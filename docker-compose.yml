@@ -1,5 +1,6 @@
 services:
   gpt-image2-web:
+    image: gpt-image2-web:latest
     build: .
     env_file:
       - .env
@@ -10,7 +11,7 @@ services:
     restart: unless-stopped
 
   gpt-image2-sealed:
-    build: .
+    image: gpt-image2-web:latest
     env_file:
       - .env
     environment:
