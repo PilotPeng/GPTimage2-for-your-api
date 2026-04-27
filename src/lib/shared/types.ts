@@ -28,6 +28,14 @@ export type ConnectivityTestResponse = Readonly<{
   message: string;
 }>;
 
+export type GenerationHistoryItem = Readonly<{
+  id: string;
+  prompt: string;
+  mode: ImageMode;
+  createdAt: string;
+  result: ImageGenerationResponse;
+}>;
+
 export type ClientImageRequest = Readonly<{
   prompt: string;
   apiBaseUrl?: string;

@@ -5,7 +5,8 @@ import { ErrorMessage } from "./ErrorMessage";
 import { ImageUploader } from "./ImageUploader";
 import { ResultGallery } from "./ResultGallery";
 import { fetchPublicConfig, generateImage, testConnectivity, type PublicConfig } from "@/lib/client/imageApi";
-import type { ImageGenerationResponse, ImageMode, UiMode } from "@/lib/shared/types";
+import { clearGenerationHistory, getGenerationHistory, saveGenerationHistoryItem } from "@/lib/client/historyStore";
+import type { GenerationHistoryItem, ImageGenerationResponse, ImageMode, UiMode } from "@/lib/shared/types";
 
 const GENERATION_COUNTDOWN_SECONDS = 180;
 
@@ -28,7 +29,6 @@ const storageKeys = {
   model: "gpt-image2.model",
   size: "gpt-image2.size",
   quality: "gpt-image2.quality",
-  history: "gpt-image2.history",
 } as const;
 
 const MAX_HISTORY_ITEMS = 8;
@@ -49,53 +49,21 @@ const getSessionValue = (key: string) => {
   return window.sessionStorage.getItem(key) ?? "";
 };
 
-const parseHistory = (value: string | null): GenerationHistoryItem[] => {
-  if (!value) {
-    return [];
+const createHistoryItemId = () => {
+  if (typeof crypto.randomUUID === "function") {
+    return `${Date.now()}-${crypto.randomUUID()}`;
   }
 
-  try {
-    const parsed = JSON.parse(value) as unknown;
-
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed.filter((item): item is GenerationHistoryItem => {
-      if (typeof item !== "object" || item === null) {
-        return false;
-      }
-
-      const record = item as Partial<GenerationHistoryItem>;
-      return (
-        typeof record.id === "string" &&
-        typeof record.prompt === "string" &&
-        typeof record.createdAt === "string" &&
-        typeof record.result === "object" &&
-        record.result !== null &&
-        Array.isArray(record.result.images)
-      );
-    });
-  } catch {
-    return [];
-  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
 const createHistoryItem = (prompt: string, mode: ImageMode, result: ImageGenerationResponse): GenerationHistoryItem => ({
-  id: `${Date.now()}-${crypto.randomUUID()}`,
+  id: createHistoryItemId(),
   prompt,
   mode,
   createdAt: new Date().toISOString(),
   result,
 });
-
-export type GenerationHistoryItem = Readonly<{
-  id: string;
-  prompt: string;
-  mode: ImageMode;
-  createdAt: string;
-  result: ImageGenerationResponse;
-}>;
 
 type PromptFormProps = Readonly<{
   variant?: UiMode;
@@ -136,6 +104,18 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
   useEffect(() => {
     let isMounted = true;
 
+    getGenerationHistory()
+      .then((storedHistory) => {
+        if (isMounted) {
+          setHistory(storedHistory);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setError("读取历史记录失败，新的生成结果仍会正常显示。");
+        }
+      });
+
     fetchPublicConfig()
       .then((publicConfig) => {
         if (!isMounted) {
@@ -151,7 +131,6 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         setModel(storedModel || publicConfig.defaultModel);
         setSize(getStoredValue(storageKeys.size));
         setQuality(getStoredValue(storageKeys.quality));
-        setHistory(parseHistory(window.localStorage.getItem(storageKeys.history)));
       })
       .catch(() => {
         if (!isMounted) {
@@ -204,15 +183,24 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     }
   };
 
-  const saveHistoryItem = (item: GenerationHistoryItem) => {
-    const nextHistory = [item, ...history].slice(0, MAX_HISTORY_ITEMS);
-    setHistory(nextHistory);
-    window.localStorage.setItem(storageKeys.history, JSON.stringify(nextHistory));
+  const saveHistoryItem = async (item: GenerationHistoryItem) => {
+    setHistory((currentHistory) => [item, ...currentHistory.filter((historyItem) => historyItem.id !== item.id)].slice(0, MAX_HISTORY_ITEMS));
+
+    try {
+      setHistory(await saveGenerationHistoryItem(item));
+    } catch {
+      setError("保存历史记录失败，当前结果仍可在刷新前查看。");
+    }
   };
 
-  const clearHistory = () => {
+  const clearHistory = async () => {
     setHistory([]);
-    window.localStorage.removeItem(storageKeys.history);
+
+    try {
+      await clearGenerationHistory();
+    } catch {
+      setError("清空历史记录失败，请稍后重试。");
+    }
   };
 
   const validateClientInput = () => {
@@ -307,7 +295,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         ...(mode !== "generate" ? { images } : {}),
       });
       setResult(response);
-      saveHistoryItem(createHistoryItem(prompt.trim(), mode, response));
+      void saveHistoryItem(createHistoryItem(prompt.trim(), mode, response));
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "生成失败，请稍后重试。");
     } finally {

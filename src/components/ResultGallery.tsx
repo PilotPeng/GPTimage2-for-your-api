@@ -1,5 +1,4 @@
-import type { GenerationHistoryItem } from "./PromptForm";
-import type { ImageGenerationResponse } from "@/lib/shared/types";
+import type { GenerationHistoryItem, ImageGenerationResponse } from "@/lib/shared/types";
 
 type ResultGalleryProps = Readonly<{
   result?: ImageGenerationResponse;

@@ -2,6 +2,18 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { PromptForm } from "@/components/PromptForm";
+import { clearGenerationHistory, getGenerationHistory, saveGenerationHistoryItem } from "@/lib/client/historyStore";
+import type { GenerationHistoryItem } from "@/lib/shared/types";
+
+vi.mock("@/lib/client/historyStore", () => ({
+  clearGenerationHistory: vi.fn(),
+  getGenerationHistory: vi.fn(),
+  saveGenerationHistoryItem: vi.fn(),
+}));
+
+const getGenerationHistoryMock = vi.mocked(getGenerationHistory);
+const saveGenerationHistoryItemMock = vi.mocked(saveGenerationHistoryItem);
+const clearGenerationHistoryMock = vi.mocked(clearGenerationHistory);
 
 const publicConfig = {
   defaultApiBaseUrl: "https://api.example.com/v1",
@@ -18,6 +30,9 @@ const publicConfig = {
 beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
+  getGenerationHistoryMock.mockResolvedValue([]);
+  saveGenerationHistoryItemMock.mockImplementation(async (item) => [item]);
+  clearGenerationHistoryMock.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -55,12 +70,16 @@ describe("PromptForm", () => {
 
     expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "https://cdn.example.com/result.png");
     expect(screen.getByText("a tiny robot", { selector: "strong" })).toBeInTheDocument();
-    expect(window.localStorage.getItem("gpt-image2.history")).toContain("a tiny robot");
+    expect(saveGenerationHistoryItemMock).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "a tiny robot",
+      result: { images: [{ url: "https://cdn.example.com/result.png" }] },
+    }));
+    expect(window.localStorage.getItem("gpt-image2.history")).toBeNull();
     expect(fetchMock).toHaveBeenLastCalledWith("api/images", expect.objectContaining({ method: "POST" }));
   });
 
   it("restores stored generation history", async () => {
-    window.localStorage.setItem("gpt-image2.history", JSON.stringify([
+    getGenerationHistoryMock.mockResolvedValue([
       {
         id: "history-1",
         prompt: "stored prompt",
@@ -68,7 +87,7 @@ describe("PromptForm", () => {
         createdAt: "2026-04-27T08:00:00.000Z",
         result: { images: [{ url: "https://cdn.example.com/stored.png" }] },
       },
-    ]));
+    ] satisfies GenerationHistoryItem[]);
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify(publicConfig), { status: 200 }),
     );
@@ -78,6 +97,29 @@ describe("PromptForm", () => {
     expect(await screen.findByText("stored prompt")).toBeInTheDocument();
     await userEvent.click(screen.getByText("stored prompt"));
     expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "https://cdn.example.com/stored.png");
+  });
+
+  it("clears stored generation history", async () => {
+    getGenerationHistoryMock.mockResolvedValue([
+      {
+        id: "history-1",
+        prompt: "stored prompt",
+        mode: "generate",
+        createdAt: "2026-04-27T08:00:00.000Z",
+        result: { images: [{ url: "https://cdn.example.com/stored.png" }] },
+      },
+    ] satisfies GenerationHistoryItem[]);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(publicConfig), { status: 200 }),
+    );
+
+    render(<PromptForm />);
+
+    expect(await screen.findByText("stored prompt")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "清空历史" }));
+
+    expect(clearGenerationHistoryMock).toHaveBeenCalled();
+    expect(screen.queryByText("stored prompt")).not.toBeInTheDocument();
   });
 
   it("runs connectivity tests without submitting the form", async () => {
