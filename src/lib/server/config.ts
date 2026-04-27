@@ -1,6 +1,11 @@
+import path from "node:path";
 import { z } from "zod";
 import { uiModes } from "@/lib/shared/types";
 import { inferApiBaseUrl } from "./apiUrls";
+
+const defaultJobDbPath = process.env.NODE_ENV === "production"
+  ? "/app/data/image-jobs.sqlite"
+  : path.join(process.cwd(), ".tmp", "image-jobs.sqlite");
 
 const envSchema = z.object({
   GPT_IMAGE2_UI_MODE: z.enum(uiModes).optional().default("configurable"),
@@ -18,6 +23,11 @@ const envSchema = z.object({
   MAX_TOTAL_UPLOAD_BYTES: z.coerce.number().int().positive().optional().default(41_943_040),
   ALLOWED_IMAGE_MIME_TYPES: z.string().optional().default("image/png,image/jpeg,image/webp"),
   ALLOW_PRIVATE_ENDPOINTS: z.enum(["true", "false"]).optional().default("false"),
+  IMAGE_JOB_DB_PATH: z.string().optional().default(defaultJobDbPath),
+  IMAGE_JOB_CONCURRENCY: z.coerce.number().int().positive().optional().default(1),
+  IMAGE_JOB_MAX_PENDING: z.coerce.number().int().positive().optional().default(20),
+  IMAGE_JOB_RESULT_TTL_MS: z.coerce.number().int().positive().optional().default(86_400_000),
+  IMAGE_JOB_POLL_RETRY_MS: z.coerce.number().int().positive().optional().default(2_000),
 });
 
 const getDefaultApiBaseUrl = (explicitBaseUrl: string, generationEndpoint: string, defaultEndpoint: string) => {
@@ -48,5 +58,12 @@ export const getServerConfig = () => {
       .map((mimeType) => mimeType.trim())
       .filter(Boolean),
     allowPrivateEndpoints: env.ALLOW_PRIVATE_ENDPOINTS === "true",
+    imageJobDbPath: env.IMAGE_JOB_DB_PATH,
+    imageJobConcurrency: env.IMAGE_JOB_CONCURRENCY,
+    imageJobMaxPending: env.IMAGE_JOB_MAX_PENDING,
+    imageJobResultTtlMs: env.IMAGE_JOB_RESULT_TTL_MS,
+    imageJobPollRetryMs: env.IMAGE_JOB_POLL_RETRY_MS,
   } as const;
 };
+
+export type ServerConfig = ReturnType<typeof getServerConfig>;

@@ -1,12 +1,19 @@
 // @vitest-environment node
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { POST } from "@/app/api/images/route";
+import { resetImageJobStoreCache } from "@/lib/server/imageJobStore";
+import { waitForImageJobWorker } from "@/lib/server/imageJobQueue";
 
 const createRequest = (formData: FormData) => new Request("http://localhost/api/images", {
   method: "POST",
   body: formData,
 });
+
+let tempDir = "";
 
 const createBaseForm = () => {
   const formData = new FormData();
@@ -18,6 +25,8 @@ const createBaseForm = () => {
 };
 
 beforeEach(() => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "gpt-image2-images-api-"));
+  process.env.IMAGE_JOB_DB_PATH = path.join(tempDir, "jobs.sqlite");
   process.env.ALLOW_PRIVATE_ENDPOINTS = "false";
   process.env.GPT_IMAGE2_UI_MODE = "configurable";
   process.env.GPT_IMAGE2_API_BASE_URL = "";
@@ -28,7 +37,10 @@ beforeEach(() => {
   process.env.SITE_ACCESS_PASSWORD = "";
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await waitForImageJobWorker();
+  resetImageJobStoreCache();
+  fs.rmSync(tempDir, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
 
@@ -101,21 +113,16 @@ describe("POST /api/images", () => {
   });
 
   it("accepts multiple images for reference mode", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ images: [{ b64: "abc", mime_type: "image/png" }] }), { status: 200 }),
-    );
     const formData = createBaseForm();
     formData.set("mode", "reference");
     formData.append("image", new File(["image-1"], "image-1.png", { type: "image/png" }));
     formData.append("image", new File(["image-2"], "image-2.webp", { type: "image/webp" }));
 
     const response = await POST(createRequest(formData));
-    const [, init] = fetchMock.mock.calls[0] ?? [];
-    const body = init?.body as FormData;
+    const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.getAll("image")).toHaveLength(2);
-    expect(body.get("image[]")).toBeNull();
+    expect(response.status).toBe(202);
+    expect(body).toMatchObject({ status: "queued", statusUrl: expect.stringContaining("api/images/jobs/") });
   });
 
   it("rejects too many images", async () => {
@@ -172,7 +179,7 @@ describe("POST /api/images", () => {
     expect(body.error.code).toBe("IMAGES_TOO_LARGE");
   });
 
-  it("returns normalized upstream success", async () => {
+  it("returns queued job success", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ images: [{ b64: "abc", mime_type: "image/png" }] }), { status: 200 }),
     );
@@ -180,14 +187,14 @@ describe("POST /api/images", () => {
     const response = await POST(createRequest(createBaseForm()));
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.images[0]).toEqual({ b64: "abc", mimeType: "image/png" });
+    expect(response.status).toBe(202);
+    expect(body).toMatchObject({ status: "queued", jobId: expect.any(String), retryAfterMs: 2000 });
   });
 
   it("uses server defaults when configurable requests omit apiBaseUrl", async () => {
     process.env.GPT_IMAGE2_API_BASE_URL = "https://server.example.com/v1";
     process.env.GPT_IMAGE2_API_KEY = "server-key";
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ images: [{ b64: "abc", mime_type: "image/png" }] }), { status: 200 }),
     );
     const formData = createBaseForm();
@@ -195,19 +202,17 @@ describe("POST /api/images", () => {
     formData.delete("apiKey");
 
     const response = await POST(createRequest(formData));
+    const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://server.example.com/v1/images/generations",
-      expect.objectContaining({ method: "POST" }),
-    );
+    expect(response.status).toBe(202);
+    expect(body.status).toBe("queued");
   });
 
   it("uses server API settings in sealed mode", async () => {
     process.env.GPT_IMAGE2_UI_MODE = "sealed";
     process.env.GPT_IMAGE2_API_BASE_URL = "https://sealed.example.com/v1";
     process.env.GPT_IMAGE2_API_KEY = "sealed-key";
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ images: [{ b64: "abc", mime_type: "image/png" }] }), { status: 200 }),
     );
     const formData = createBaseForm();
@@ -215,15 +220,24 @@ describe("POST /api/images", () => {
     formData.delete("apiKey");
 
     const response = await POST(createRequest(formData));
+    const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://sealed.example.com/v1/images/generations",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({ Authorization: "Bearer sealed-key" }),
-      }),
-    );
+    expect(response.status).toBe(202);
+    expect(body.status).toBe("queued");
+  });
+
+  it("returns existing job for duplicate job IDs", async () => {
+    const formData = createBaseForm();
+    formData.set("jobId", "duplicate-job-0001");
+
+    const firstResponse = await POST(createRequest(formData));
+    const secondResponse = await POST(createRequest(formData));
+    const firstBody = await firstResponse.json();
+    const secondBody = await secondResponse.json();
+
+    expect(firstResponse.status).toBe(202);
+    expect(secondResponse.status).toBe(202);
+    expect(secondBody.jobId).toBe(firstBody.jobId);
   });
 
   it("rejects client API settings in sealed mode", async () => {

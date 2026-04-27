@@ -23,7 +23,7 @@ const formSchema = z.object({
 });
 
 export type UploadedImage = Readonly<{
-  file: File;
+  file?: File;
   bytes: ArrayBuffer;
   filename: string;
   mimeType: string;

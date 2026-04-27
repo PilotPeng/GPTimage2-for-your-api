@@ -3,7 +3,8 @@ import type {
   ClientImageRequest,
   ConnectivityTestRequest,
   ConnectivityTestResponse,
-  ImageGenerationResponse,
+  ImageJobCreateResponse,
+  ImageJobStatusResponse,
 } from "@/lib/shared/types";
 
 export type PublicConfig = Readonly<{
@@ -51,7 +52,7 @@ export const testConnectivity = async (request: ConnectivityTestRequest): Promis
   return (await response.json()) as ConnectivityTestResponse;
 };
 
-export const generateImage = async (request: ClientImageRequest): Promise<ImageGenerationResponse> => {
+const createImageRequestFormData = (request: ClientImageRequest, jobId: string) => {
   const formData = new FormData();
   formData.set("prompt", request.prompt);
   formData.set("mode", request.mode);
@@ -84,14 +85,32 @@ export const generateImage = async (request: ClientImageRequest): Promise<ImageG
     formData.append("image", image);
   }
 
+  formData.set("jobId", jobId);
+
+  return formData;
+};
+
+export const createImageJob = async (request: ClientImageRequest, jobId: string): Promise<ImageJobCreateResponse> => {
   const response = await fetch("api/images", {
     method: "POST",
-    body: formData,
+    body: createImageRequestFormData(request, jobId),
   });
 
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response));
   }
 
-  return (await response.json()) as ImageGenerationResponse;
+  return (await response.json()) as ImageJobCreateResponse;
+};
+
+export const fetchImageJob = async (jobId: string): Promise<ImageJobStatusResponse> => {
+  const response = await fetch(`api/images/jobs/${encodeURIComponent(jobId)}`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as ImageJobStatusResponse;
 };

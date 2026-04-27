@@ -6,6 +6,9 @@ services:
       - .env
     environment:
       GPT_IMAGE2_UI_MODE: configurable
+      IMAGE_JOB_DB_PATH: /app/data/image-jobs.sqlite
+    volumes:
+      - gpt-image2-web-jobs:/app/data
     ports:
       - "3000:3000"
     restart: unless-stopped
@@ -16,6 +19,13 @@ services:
       - .env
     environment:
       GPT_IMAGE2_UI_MODE: sealed
+      IMAGE_JOB_DB_PATH: /app/data/image-jobs.sqlite
+    volumes:
+      - gpt-image2-sealed-jobs:/app/data
     ports:
       - "3001:3000"
     restart: unless-stopped
+
+volumes:
+  gpt-image2-web-jobs:
+  gpt-image2-sealed-jobs:

@@ -36,6 +36,30 @@ export type GenerationHistoryItem = Readonly<{
   result: ImageGenerationResponse;
 }>;
 
+export type ImageJobStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type ImageJobError = Readonly<{
+  code: string;
+  message: string;
+}>;
+
+export type ImageJobCreateResponse = Readonly<{
+  jobId: string;
+  status: ImageJobStatus;
+  statusUrl: string;
+  retryAfterMs: number;
+}>;
+
+export type ImageJobStatusResponse = Readonly<{
+  jobId: string;
+  status: ImageJobStatus;
+  createdAt: string;
+  updatedAt: string;
+  retryAfterMs: number;
+  result?: ImageGenerationResponse;
+  error?: ImageJobError;
+}>;
+
 export type ClientImageRequest = Readonly<{
   prompt: string;
   apiBaseUrl?: string;

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerConfig } from "@/lib/server/config";
 import { createErrorResponse, AppError } from "@/lib/server/errors";
-import { generateImage } from "@/lib/server/gptImage2Client";
+import { createImageJobId, enqueueImageJob } from "@/lib/server/imageJobQueue";
 import { parseImageRequest } from "@/lib/server/imageRequest";
 
 export const runtime = "nodejs";
@@ -17,6 +17,11 @@ const verifySiteAccess = (sitePassword: string | undefined, expectedPassword: st
 };
 
 const MULTIPART_OVERHEAD_BYTES = 1_048_576;
+
+const getFormJobId = (formData: FormData) => {
+  const value = formData.get("jobId");
+  return typeof value === "string" && value.trim() ? value.trim() : createImageJobId();
+};
 
 const verifyRequestSize = (request: Request, maxTotalUploadBytes: number) => {
   const contentLength = request.headers.get("content-length");
@@ -53,15 +58,9 @@ export async function POST(request: Request) {
 
     verifySiteAccess(input.sitePassword, config.siteAccessPassword);
 
-    const result = await generateImage(input, {
-      defaultApiKey: config.defaultApiKey,
-      defaultModel: input.model ?? config.defaultModel,
-      authHeader: config.authHeader,
-      authScheme: config.authScheme,
-      requestTimeoutMs: config.requestTimeoutMs,
-    });
+    const job = enqueueImageJob(getFormJobId(formData), input, config);
 
-    return NextResponse.json(result);
+    return NextResponse.json(job, { status: 202 });
   } catch (error) {
     return createErrorResponse(error);
   }

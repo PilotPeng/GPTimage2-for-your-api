@@ -58,7 +58,17 @@ describe("PromptForm", () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(publicConfig), { status: 200 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ images: [{ url: "https://cdn.example.com/result.png" }] }), { status: 200 }),
+        new Response(JSON.stringify({ jobId: "job-1", status: "queued", statusUrl: "api/images/jobs/job-1", retryAfterMs: 1 }), { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          jobId: "job-1",
+          status: "succeeded",
+          createdAt: "2026-04-27T08:00:00.000Z",
+          updatedAt: "2026-04-27T08:00:01.000Z",
+          retryAfterMs: 1,
+          result: { images: [{ url: "https://cdn.example.com/result.png" }] },
+        }), { status: 200 }),
       );
 
     render(<PromptForm />);
@@ -75,7 +85,7 @@ describe("PromptForm", () => {
       result: { images: [{ url: "https://cdn.example.com/result.png" }] },
     }));
     expect(window.localStorage.getItem("gpt-image2.history")).toBeNull();
-    expect(fetchMock).toHaveBeenLastCalledWith("api/images", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock.mock.calls.some(([url]) => url === "api/images")).toBe(true);
   });
 
   it("restores stored generation history", async () => {
@@ -122,6 +132,32 @@ describe("PromptForm", () => {
     expect(screen.queryByText("stored prompt")).not.toBeInTheDocument();
   });
 
+  it("resumes active image jobs after refresh", async () => {
+    window.localStorage.setItem("gpt-image2.activeJob", JSON.stringify({
+      jobId: "job-resume",
+      prompt: "resume prompt",
+      mode: "generate",
+      createdAt: "2026-04-27T08:00:00.000Z",
+      retryAfterMs: 1,
+    }));
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(publicConfig), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        jobId: "job-resume",
+        status: "succeeded",
+        createdAt: "2026-04-27T08:00:00.000Z",
+        updatedAt: "2026-04-27T08:00:01.000Z",
+        retryAfterMs: 1,
+        result: { images: [{ url: "https://cdn.example.com/resume.png" }] },
+      }), { status: 200 }));
+
+    render(<PromptForm />);
+
+    expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "https://cdn.example.com/resume.png");
+    expect(saveGenerationHistoryItemMock).toHaveBeenCalledWith(expect.objectContaining({ prompt: "resume prompt" }));
+  });
+
   it("runs connectivity tests without submitting the form", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     fetchMock
@@ -162,7 +198,17 @@ describe("PromptForm", () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(publicConfig), { status: 200 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ images: [{ url: "https://cdn.example.com/reference.png" }] }), { status: 200 }),
+        new Response(JSON.stringify({ jobId: "job-1", status: "queued", statusUrl: "api/images/jobs/job-1", retryAfterMs: 1 }), { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          jobId: "job-1",
+          status: "succeeded",
+          createdAt: "2026-04-27T08:00:00.000Z",
+          updatedAt: "2026-04-27T08:00:01.000Z",
+          retryAfterMs: 1,
+          result: { images: [{ url: "https://cdn.example.com/reference.png" }] },
+        }), { status: 200 }),
       );
 
     render(<PromptForm />);
@@ -177,19 +223,19 @@ describe("PromptForm", () => {
     await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
     expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "https://cdn.example.com/reference.png");
-    const [, init] = fetchMock.mock.calls.at(-1) ?? [];
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "api/images") ?? [];
     const formData = init?.body as FormData;
     expect(formData.getAll("image")).toHaveLength(2);
     expect(formData.get("image[]")).toBeNull();
   });
 
-  it("shows a 180 second countdown while generating", async () => {
-    let resolveGeneration: (response: Response) => void = () => undefined;
+  it("shows a 180 second countdown while queued", async () => {
+    let resolveJob: (response: Response) => void = () => undefined;
     const fetchMock = vi.spyOn(globalThis, "fetch");
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(publicConfig), { status: 200 }))
       .mockReturnValueOnce(new Promise<Response>((resolve) => {
-        resolveGeneration = resolve;
+        resolveJob = resolve;
       }));
 
     render(<PromptForm />);
@@ -198,9 +244,8 @@ describe("PromptForm", () => {
     await userEvent.type(screen.getByLabelText("创作描述"), "countdown prompt");
     await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
-    expect(screen.getByRole("button", { name: "生成中... 180s" })).toBeDisabled();
-    resolveGeneration(new Response(JSON.stringify({ images: [{ url: "https://cdn.example.com/countdown.png" }] }), { status: 200 }));
-    expect(await screen.findByRole("button", { name: "开始生成" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "排队中... 180s" })).toBeDisabled();
+    resolveJob(new Response(JSON.stringify({ jobId: "job-1", status: "queued", statusUrl: "api/images/jobs/job-1", retryAfterMs: 1 }), { status: 202 }));
   });
 
   it("clears selected images when switching back to generate mode", async () => {
@@ -208,7 +253,17 @@ describe("PromptForm", () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify(publicConfig), { status: 200 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ images: [{ url: "https://cdn.example.com/generate.png" }] }), { status: 200 }),
+        new Response(JSON.stringify({ jobId: "job-1", status: "queued", statusUrl: "api/images/jobs/job-1", retryAfterMs: 1 }), { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          jobId: "job-1",
+          status: "succeeded",
+          createdAt: "2026-04-27T08:00:00.000Z",
+          updatedAt: "2026-04-27T08:00:01.000Z",
+          retryAfterMs: 1,
+          result: { images: [{ url: "https://cdn.example.com/generate.png" }] },
+        }), { status: 200 }),
       );
 
     render(<PromptForm />);
@@ -222,7 +277,7 @@ describe("PromptForm", () => {
     await userEvent.type(screen.getByLabelText("创作描述"), "generate prompt");
     await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
-    const [, init] = fetchMock.mock.calls.at(-1) ?? [];
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "api/images") ?? [];
     const formData = init?.body as FormData;
     expect(formData.getAll("image")).toHaveLength(0);
   });
@@ -232,7 +287,17 @@ describe("PromptForm", () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify({ ...publicConfig, defaultApiBaseUrl: "", apiSettingsEditable: false }), { status: 200 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ images: [{ url: "https://cdn.example.com/sealed.png" }] }), { status: 200 }),
+        new Response(JSON.stringify({ jobId: "job-1", status: "queued", statusUrl: "api/images/jobs/job-1", retryAfterMs: 1 }), { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          jobId: "job-1",
+          status: "succeeded",
+          createdAt: "2026-04-27T08:00:00.000Z",
+          updatedAt: "2026-04-27T08:00:01.000Z",
+          retryAfterMs: 1,
+          result: { images: [{ url: "https://cdn.example.com/sealed.png" }] },
+        }), { status: 200 }),
       );
 
     render(<PromptForm variant="sealed" />);
@@ -251,7 +316,7 @@ describe("PromptForm", () => {
     await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
     expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "https://cdn.example.com/sealed.png");
-    const [, init] = fetchMock.mock.calls.at(-1) ?? [];
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "api/images") ?? [];
     expect(init?.body).toBeInstanceOf(FormData);
     const formData = init?.body as FormData;
     expect(formData.get("apiBaseUrl")).toBeNull();

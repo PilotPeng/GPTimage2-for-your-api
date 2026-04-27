@@ -1,14 +1,16 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ErrorMessage } from "./ErrorMessage";
 import { ImageUploader } from "./ImageUploader";
 import { ResultGallery } from "./ResultGallery";
-import { fetchPublicConfig, generateImage, testConnectivity, type PublicConfig } from "@/lib/client/imageApi";
+import { createImageJob, fetchImageJob, fetchPublicConfig, testConnectivity, type PublicConfig } from "@/lib/client/imageApi";
 import { clearGenerationHistory, getGenerationHistory, saveGenerationHistoryItem } from "@/lib/client/historyStore";
-import type { GenerationHistoryItem, ImageGenerationResponse, ImageMode, UiMode } from "@/lib/shared/types";
+import type { ClientImageRequest, GenerationHistoryItem, ImageGenerationResponse, ImageJobStatus, ImageMode, UiMode } from "@/lib/shared/types";
 
 const GENERATION_COUNTDOWN_SECONDS = 180;
+const ACTIVE_JOB_STORAGE_KEY = "gpt-image2.activeJob";
+const ACTIVE_JOB_NOT_FOUND_LIMIT = 3;
 
 const fallbackConfig: PublicConfig = {
   defaultApiBaseUrl: "",
@@ -49,25 +51,69 @@ const getSessionValue = (key: string) => {
   return window.sessionStorage.getItem(key) ?? "";
 };
 
-const createHistoryItemId = () => {
-  if (typeof crypto.randomUUID === "function") {
-    return `${Date.now()}-${crypto.randomUUID()}`;
+const createClientId = () => {
+  const browserCrypto = globalThis.crypto;
+
+  if (typeof browserCrypto?.randomUUID === "function") {
+    return browserCrypto.randomUUID();
   }
 
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  if (typeof browserCrypto?.getRandomValues === "function") {
+    const values = browserCrypto.getRandomValues(new Uint32Array(4));
+    return Array.from(values, (value) => value.toString(36).padStart(7, "0")).join("-");
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 };
 
 const createHistoryItem = (prompt: string, mode: ImageMode, result: ImageGenerationResponse): GenerationHistoryItem => ({
-  id: createHistoryItemId(),
+  id: createClientId(),
   prompt,
   mode,
   createdAt: new Date().toISOString(),
   result,
 });
 
+type ActiveImageJob = Readonly<{
+  jobId: string;
+  prompt: string;
+  mode: ImageMode;
+  createdAt: string;
+  retryAfterMs: number;
+}>;
+
 type PromptFormProps = Readonly<{
   variant?: UiMode;
 }>;
+
+const parseActiveJob = (value: string | null): ActiveImageJob | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<ActiveImageJob>;
+
+    if (
+      typeof parsed.jobId === "string" &&
+      typeof parsed.prompt === "string" &&
+      typeof parsed.createdAt === "string" &&
+      (parsed.mode === "generate" || parsed.mode === "reference" || parsed.mode === "edit")
+    ) {
+      return {
+        jobId: parsed.jobId,
+        prompt: parsed.prompt,
+        mode: parsed.mode,
+        createdAt: parsed.createdAt,
+        retryAfterMs: typeof parsed.retryAfterMs === "number" ? parsed.retryAfterMs : 2_000,
+      };
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+};
 
 export function PromptForm({ variant = "configurable" }: PromptFormProps) {
   const isConfigurable = variant === "configurable";
@@ -86,8 +132,17 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
   const [error, setError] = useState("");
   const [connectivityMessage, setConnectivityMessage] = useState("");
   const [isTestingConnectivity, setIsTestingConnectivity] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const initialActiveJob = typeof window === "undefined" ? undefined : parseActiveJob(window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY));
+  const [isSubmitting, setIsSubmitting] = useState(() => Boolean(initialActiveJob));
   const [countdownSeconds, setCountdownSeconds] = useState(GENERATION_COUNTDOWN_SECONDS);
+  const [activeJob, setActiveJob] = useState<ActiveImageJob | undefined>(() => initialActiveJob);
+  const [jobStatus, setJobStatus] = useState<ImageJobStatus | undefined>(() => initialActiveJob ? "queued" : undefined);
+  const activeJobRef = useRef<ActiveImageJob | undefined>(undefined);
+  const notFoundCountRef = useRef(0);
+
+  useEffect(() => {
+    activeJobRef.current = activeJob;
+  }, [activeJob]);
 
   useEffect(() => {
     if (!isSubmitting) {
@@ -183,6 +238,18 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     }
   };
 
+  const persistActiveJob = (job: ActiveImageJob) => {
+    setActiveJob(job);
+    window.localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify(job));
+  };
+
+  const clearActiveJob = () => {
+    setActiveJob(undefined);
+    setJobStatus(undefined);
+    window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+    notFoundCountRef.current = 0;
+  };
+
   const saveHistoryItem = async (item: GenerationHistoryItem) => {
     setHistory((currentHistory) => [item, ...currentHistory.filter((historyItem) => historyItem.id !== item.id)].slice(0, MAX_HISTORY_ITEMS));
 
@@ -202,6 +269,93 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
       setError("清空历史记录失败，请稍后重试。");
     }
   };
+
+  const completeImageJob = useCallback((job: ActiveImageJob, response: ImageGenerationResponse) => {
+    setResult(response);
+    void saveHistoryItem(createHistoryItem(job.prompt, job.mode, response));
+    clearActiveJob();
+    setIsSubmitting(false);
+  }, []);
+
+  const pollImageJob = useCallback(async (job: ActiveImageJob) => {
+    try {
+      const response = await fetchImageJob(job.jobId);
+      notFoundCountRef.current = 0;
+      setJobStatus(response.status);
+
+      if (response.status === "succeeded" && response.result) {
+        completeImageJob(job, response.result);
+        return;
+      }
+
+      if (response.status === "failed") {
+        setError(response.error?.message ?? "生成失败，请稍后重试。");
+        clearActiveJob();
+        setIsSubmitting(false);
+        return;
+      }
+
+      const nextJob = { ...job, retryAfterMs: response.retryAfterMs };
+      persistActiveJob(nextJob);
+    } catch (pollError) {
+      notFoundCountRef.current += 1;
+
+      if (notFoundCountRef.current >= ACTIVE_JOB_NOT_FOUND_LIMIT) {
+        setError(pollError instanceof Error ? pollError.message : "任务已过期或服务器已重启，请重新提交。");
+        clearActiveJob();
+        setIsSubmitting(false);
+      }
+    }
+  }, [completeImageJob]);
+
+  useEffect(() => {
+    if (!activeJob || !isSubmitting) {
+      return;
+    }
+
+    let isCancelled = false;
+    let timeoutId: number | undefined;
+
+    const schedulePoll = async (delayMs: number) => {
+      timeoutId = window.setTimeout(async () => {
+        if (isCancelled || !activeJobRef.current) {
+          return;
+        }
+
+        await pollImageJob(activeJobRef.current);
+
+        if (!isCancelled && activeJobRef.current) {
+          void schedulePoll(activeJobRef.current.retryAfterMs);
+        }
+      }, delayMs);
+    };
+
+    void schedulePoll(0);
+
+    return () => {
+      isCancelled = true;
+
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [activeJob, isSubmitting, pollImageJob]);
+
+  useEffect(() => {
+    const pollCurrentJob = () => {
+      if (activeJobRef.current) {
+        void pollImageJob(activeJobRef.current);
+      }
+    };
+
+    window.addEventListener("focus", pollCurrentJob);
+    document.addEventListener("visibilitychange", pollCurrentJob);
+
+    return () => {
+      window.removeEventListener("focus", pollCurrentJob);
+      document.removeEventListener("visibilitychange", pollCurrentJob);
+    };
+  }, [pollImageJob]);
 
   const validateClientInput = () => {
     if (isConfigurable && !apiBaseUrl.trim()) {
@@ -267,6 +421,18 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     }
   };
 
+  const createClientImageRequest = (): ClientImageRequest => ({
+    prompt,
+    mode,
+    ...(isConfigurable && apiBaseUrl.trim() ? { apiBaseUrl: apiBaseUrl.trim() } : {}),
+    ...(isConfigurable && apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+    ...(model.trim() ? { model: model.trim() } : {}),
+    ...(size.trim() ? { size: size.trim() } : {}),
+    ...(quality.trim() ? { quality: quality.trim() } : {}),
+    ...(sitePassword.trim() ? { sitePassword: sitePassword.trim() } : {}),
+    ...(mode !== "generate" ? { images } : {}),
+  });
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const validationError = validateClientInput();
@@ -276,30 +442,36 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
       return;
     }
 
+    const job: ActiveImageJob = {
+      jobId: createClientId(),
+      prompt: prompt.trim(),
+      mode,
+      createdAt: new Date().toISOString(),
+      retryAfterMs: 2_000,
+    };
+
     setCountdownSeconds(GENERATION_COUNTDOWN_SECONDS);
     setIsSubmitting(true);
+    setJobStatus("queued");
     setError("");
     setConnectivityMessage("");
     setResult(undefined);
+    persistActiveJob(job);
 
     try {
-      const response = await generateImage({
-        prompt,
-        mode,
-        ...(isConfigurable && apiBaseUrl.trim() ? { apiBaseUrl: apiBaseUrl.trim() } : {}),
-        ...(isConfigurable && apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-        ...(model.trim() ? { model: model.trim() } : {}),
-        ...(size.trim() ? { size: size.trim() } : {}),
-        ...(quality.trim() ? { quality: quality.trim() } : {}),
-        ...(sitePassword.trim() ? { sitePassword: sitePassword.trim() } : {}),
-        ...(mode !== "generate" ? { images } : {}),
-      });
-      setResult(response);
-      void saveHistoryItem(createHistoryItem(prompt.trim(), mode, response));
+      const createdJob = await createImageJob(createClientImageRequest(), job.jobId);
+      const nextJob = { ...job, retryAfterMs: createdJob.retryAfterMs };
+      setJobStatus(createdJob.status);
+      persistActiveJob(nextJob);
+      await pollImageJob(nextJob);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "生成失败，请稍后重试。");
-    } finally {
-      setIsSubmitting(false);
+      await pollImageJob(job);
+
+      if (activeJobRef.current?.jobId !== job.jobId) {
+        return;
+      }
+
+      setError(submitError instanceof Error ? submitError.message : "生成任务提交失败，请稍后重试。");
     }
   };
 
@@ -309,6 +481,22 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     setResult(undefined);
     setError("");
     setConnectivityMessage("");
+  };
+
+  const getSubmitButtonLabel = () => {
+    if (!isSubmitting) {
+      return "开始生成";
+    }
+
+    if (jobStatus === "queued") {
+      return `排队中... ${countdownSeconds}s`;
+    }
+
+    if (jobStatus === "running") {
+      return `生成中... ${countdownSeconds}s`;
+    }
+
+    return `正在恢复任务... ${countdownSeconds}s`;
   };
 
   return (
@@ -425,11 +613,12 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
           />
         )}
 
+        {activeJob ? <p className="field-help">任务已提交，页面刷新后会自动继续查询结果。</p> : null}
         <ErrorMessage message={error} />
 
         <div className="button-row">
           <button className="primary-button" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? `生成中... ${countdownSeconds}s` : "开始生成"}
+            {getSubmitButtonLabel()}
           </button>
           <button className="secondary-button" type="button" onClick={resetForm} disabled={isSubmitting}>
             清空
