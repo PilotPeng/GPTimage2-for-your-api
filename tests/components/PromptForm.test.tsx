@@ -28,6 +28,7 @@ const publicConfig = {
 };
 
 beforeEach(() => {
+  window.history.replaceState(null, "", "/");
   window.localStorage.clear();
   window.sessionStorage.clear();
   getGenerationHistoryMock.mockResolvedValue([]);
@@ -85,7 +86,39 @@ describe("PromptForm", () => {
       result: { images: [{ url: "https://cdn.example.com/result.png" }] },
     }));
     expect(window.localStorage.getItem("gpt-image2.history")).toBeNull();
-    expect(fetchMock.mock.calls.some(([url]) => url === "api/images")).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/images")).toBe(true);
+  });
+
+  it("keeps API requests under sealed path without a trailing slash", async () => {
+    window.history.replaceState(null, "", "/sealed");
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...publicConfig, defaultApiBaseUrl: "", apiSettingsEditable: false }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jobId: "job-1", status: "queued", statusUrl: "api/images/jobs/job-1", retryAfterMs: 1 }), { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          jobId: "job-1",
+          status: "succeeded",
+          createdAt: "2026-04-27T08:00:00.000Z",
+          updatedAt: "2026-04-27T08:00:01.000Z",
+          retryAfterMs: 1,
+          result: { images: [{ url: "https://cdn.example.com/sealed-path.png" }] },
+        }), { status: 200 }),
+      );
+
+    render(<PromptForm variant="sealed" />);
+
+    await userEvent.type(await screen.findByLabelText("创作描述"), "sealed path prompt");
+    await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
+
+    expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "https://cdn.example.com/sealed-path.png");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(expect.arrayContaining([
+      "/sealed/api/config",
+      "/sealed/api/images",
+    ]));
+    expect(fetchMock.mock.calls.filter(([url]) => typeof url === "string" && url.startsWith("/sealed/api/images/jobs/"))).not.toHaveLength(0);
   });
 
   it("restores stored generation history", async () => {
@@ -175,7 +208,7 @@ describe("PromptForm", () => {
 
     expect(await screen.findByText("连通测试成功：/models 可访问，未触发图片生成。")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "api/connectivity",
+      "/api/connectivity",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -223,7 +256,7 @@ describe("PromptForm", () => {
     await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
     expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "https://cdn.example.com/reference.png");
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "api/images") ?? [];
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/images") ?? [];
     const formData = init?.body as FormData;
     expect(formData.getAll("image")).toHaveLength(2);
     expect(formData.get("image[]")).toBeNull();
@@ -277,7 +310,7 @@ describe("PromptForm", () => {
     await userEvent.type(screen.getByLabelText("创作描述"), "generate prompt");
     await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "api/images") ?? [];
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/images") ?? [];
     const formData = init?.body as FormData;
     expect(formData.getAll("image")).toHaveLength(0);
   });
@@ -316,7 +349,7 @@ describe("PromptForm", () => {
     await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
     expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "https://cdn.example.com/sealed.png");
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "api/images") ?? [];
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/images") ?? [];
     expect(init?.body).toBeInstanceOf(FormData);
     const formData = init?.body as FormData;
     expect(formData.get("apiBaseUrl")).toBeNull();

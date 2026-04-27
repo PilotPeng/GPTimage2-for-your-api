@@ -19,6 +19,18 @@ export type PublicConfig = Readonly<{
   serverApiConfigured: boolean;
 }>;
 
+const getApiPath = (path: string) => {
+  const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
+
+  if (typeof window === "undefined") {
+    return normalizedPath;
+  }
+
+  const currentPath = window.location.pathname;
+  const basePath = currentPath.endsWith("/") ? currentPath : `${currentPath}/`;
+  return `${basePath}${normalizedPath}`;
+};
+
 const parseErrorMessage = async (response: Response) => {
   try {
     const body = (await response.json()) as Partial<ApiErrorBody>;
@@ -29,7 +41,7 @@ const parseErrorMessage = async (response: Response) => {
 };
 
 export const fetchPublicConfig = async (): Promise<PublicConfig> => {
-  const response = await fetch("api/config");
+  const response = await fetch(getApiPath("api/config"));
 
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response));
@@ -39,7 +51,7 @@ export const fetchPublicConfig = async (): Promise<PublicConfig> => {
 };
 
 export const testConnectivity = async (request: ConnectivityTestRequest): Promise<ConnectivityTestResponse> => {
-  const response = await fetch("api/connectivity", {
+  const response = await fetch(getApiPath("api/connectivity"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -91,7 +103,7 @@ const createImageRequestFormData = (request: ClientImageRequest, jobId: string) 
 };
 
 export const createImageJob = async (request: ClientImageRequest, jobId: string): Promise<ImageJobCreateResponse> => {
-  const response = await fetch("api/images", {
+  const response = await fetch(getApiPath("api/images"), {
     method: "POST",
     body: createImageRequestFormData(request, jobId),
   });
@@ -104,7 +116,7 @@ export const createImageJob = async (request: ClientImageRequest, jobId: string)
 };
 
 export const fetchImageJob = async (jobId: string): Promise<ImageJobStatusResponse> => {
-  const response = await fetch(`api/images/jobs/${encodeURIComponent(jobId)}`, {
+  const response = await fetch(getApiPath(`api/images/jobs/${encodeURIComponent(jobId)}`), {
     cache: "no-store",
   });
 
