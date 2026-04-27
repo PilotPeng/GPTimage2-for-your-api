@@ -3,7 +3,8 @@ WORKDIR /app
 RUN sed -i 's#https://dl-cdn.alpinelinux.org/alpine#https://mirrors.cloud.tencent.com/alpine#g' /etc/apk/repositories \
   && apk add --no-cache python3 make g++
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm config set registry https://registry.npmmirror.com \
+  && npm ci
 
 FROM node:24-alpine AS builder
 WORKDIR /app
