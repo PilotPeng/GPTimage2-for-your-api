@@ -1,0 +1,20 @@
+services:
+  gpt-image2-web:
+    build: .
+    env_file:
+      - .env
+    environment:
+      GPT_IMAGE2_UI_MODE: configurable
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  gpt-image2-sealed:
+    build: .
+    env_file:
+      - .env
+    environment:
+      GPT_IMAGE2_UI_MODE: sealed
+    ports:
+      - "3001:3000"
+    restart: unless-stopped

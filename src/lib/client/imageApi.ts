@@ -1,0 +1,97 @@
+import type {
+  ApiErrorBody,
+  ClientImageRequest,
+  ConnectivityTestRequest,
+  ConnectivityTestResponse,
+  ImageGenerationResponse,
+} from "@/lib/shared/types";
+
+export type PublicConfig = Readonly<{
+  defaultApiBaseUrl: string;
+  defaultModel: string;
+  requiresSitePassword: boolean;
+  maxUploadBytes: number;
+  maxUploadCount: number;
+  maxTotalUploadBytes: number;
+  allowedImageMimeTypes: readonly string[];
+  apiSettingsEditable: boolean;
+  serverApiConfigured: boolean;
+}>;
+
+const parseErrorMessage = async (response: Response) => {
+  try {
+    const body = (await response.json()) as Partial<ApiErrorBody>;
+    return body.error?.message ?? "请求失败，请稍后重试。";
+  } catch {
+    return "请求失败，请稍后重试。";
+  }
+};
+
+export const fetchPublicConfig = async (): Promise<PublicConfig> => {
+  const response = await fetch("api/config");
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as PublicConfig;
+};
+
+export const testConnectivity = async (request: ConnectivityTestRequest): Promise<ConnectivityTestResponse> => {
+  const response = await fetch("api/connectivity", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as ConnectivityTestResponse;
+};
+
+export const generateImage = async (request: ClientImageRequest): Promise<ImageGenerationResponse> => {
+  const formData = new FormData();
+  formData.set("prompt", request.prompt);
+  formData.set("mode", request.mode);
+
+  if (request.apiBaseUrl) {
+    formData.set("apiBaseUrl", request.apiBaseUrl);
+  }
+
+  if (request.apiKey) {
+    formData.set("apiKey", request.apiKey);
+  }
+
+  if (request.model) {
+    formData.set("model", request.model);
+  }
+
+  if (request.size) {
+    formData.set("size", request.size);
+  }
+
+  if (request.quality) {
+    formData.set("quality", request.quality);
+  }
+
+  if (request.sitePassword) {
+    formData.set("sitePassword", request.sitePassword);
+  }
+
+  for (const image of request.images ?? []) {
+    formData.append("image", image);
+  }
+
+  const response = await fetch("api/images", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as ImageGenerationResponse;
+};
