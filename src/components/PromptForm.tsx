@@ -7,6 +7,8 @@ import { ResultGallery } from "./ResultGallery";
 import { fetchPublicConfig, generateImage, testConnectivity, type PublicConfig } from "@/lib/client/imageApi";
 import type { ImageGenerationResponse, ImageMode, UiMode } from "@/lib/shared/types";
 
+const GENERATION_COUNTDOWN_SECONDS = 180;
+
 const fallbackConfig: PublicConfig = {
   defaultApiBaseUrl: "",
   defaultModel: "gpt-image2",
@@ -26,7 +28,10 @@ const storageKeys = {
   model: "gpt-image2.model",
   size: "gpt-image2.size",
   quality: "gpt-image2.quality",
+  history: "gpt-image2.history",
 } as const;
+
+const MAX_HISTORY_ITEMS = 8;
 
 const getStoredValue = (key: string) => {
   if (typeof window === "undefined") {
@@ -43,6 +48,54 @@ const getSessionValue = (key: string) => {
 
   return window.sessionStorage.getItem(key) ?? "";
 };
+
+const parseHistory = (value: string | null): GenerationHistoryItem[] => {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((item): item is GenerationHistoryItem => {
+      if (typeof item !== "object" || item === null) {
+        return false;
+      }
+
+      const record = item as Partial<GenerationHistoryItem>;
+      return (
+        typeof record.id === "string" &&
+        typeof record.prompt === "string" &&
+        typeof record.createdAt === "string" &&
+        typeof record.result === "object" &&
+        record.result !== null &&
+        Array.isArray(record.result.images)
+      );
+    });
+  } catch {
+    return [];
+  }
+};
+
+const createHistoryItem = (prompt: string, mode: ImageMode, result: ImageGenerationResponse): GenerationHistoryItem => ({
+  id: `${Date.now()}-${crypto.randomUUID()}`,
+  prompt,
+  mode,
+  createdAt: new Date().toISOString(),
+  result,
+});
+
+export type GenerationHistoryItem = Readonly<{
+  id: string;
+  prompt: string;
+  mode: ImageMode;
+  createdAt: string;
+  result: ImageGenerationResponse;
+}>;
 
 type PromptFormProps = Readonly<{
   variant?: UiMode;
@@ -61,10 +114,24 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
   const [prompt, setPrompt] = useState("");
   const [images, setImages] = useState<File[]>([]);
   const [result, setResult] = useState<ImageGenerationResponse>();
+  const [history, setHistory] = useState<GenerationHistoryItem[]>([]);
   const [error, setError] = useState("");
   const [connectivityMessage, setConnectivityMessage] = useState("");
   const [isTestingConnectivity, setIsTestingConnectivity] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [countdownSeconds, setCountdownSeconds] = useState(GENERATION_COUNTDOWN_SECONDS);
+
+  useEffect(() => {
+    if (!isSubmitting) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setCountdownSeconds((currentSeconds) => Math.max(0, currentSeconds - 1));
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [isSubmitting]);
 
   useEffect(() => {
     let isMounted = true;
@@ -84,6 +151,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         setModel(storedModel || publicConfig.defaultModel);
         setSize(getStoredValue(storageKeys.size));
         setQuality(getStoredValue(storageKeys.quality));
+        setHistory(parseHistory(window.localStorage.getItem(storageKeys.history)));
       })
       .catch(() => {
         if (!isMounted) {
@@ -136,6 +204,17 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     }
   };
 
+  const saveHistoryItem = (item: GenerationHistoryItem) => {
+    const nextHistory = [item, ...history].slice(0, MAX_HISTORY_ITEMS);
+    setHistory(nextHistory);
+    window.localStorage.setItem(storageKeys.history, JSON.stringify(nextHistory));
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    window.localStorage.removeItem(storageKeys.history);
+  };
+
   const validateClientInput = () => {
     if (isConfigurable && !apiBaseUrl.trim()) {
       return "请输入 API 基础地址。";
@@ -146,7 +225,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     }
 
     if (!prompt.trim()) {
-      return "请输入 prompt。";
+      return "请输入创作描述。";
     }
 
     if (mode === "generate") {
@@ -209,6 +288,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
       return;
     }
 
+    setCountdownSeconds(GENERATION_COUNTDOWN_SECONDS);
     setIsSubmitting(true);
     setError("");
     setConnectivityMessage("");
@@ -227,6 +307,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         ...(mode !== "generate" ? { images } : {}),
       });
       setResult(response);
+      saveHistoryItem(createHistoryItem(prompt.trim(), mode, response));
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "生成失败，请稍后重试。");
     } finally {
@@ -246,8 +327,8 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     <div className="workspace-grid">
       <form className="generator-card" onSubmit={handleSubmit} noValidate>
         <div className="section-heading">
-          <h2>生成设置</h2>
-          <span>{mode === "generate" ? "将自动使用 /images/generations" : "将自动使用 /images/edits"}</span>
+          <h2>创作设置</h2>
+          <span>{mode === "generate" ? "适合从文字直接生成图片" : "适合结合参考图生成或编辑"}</span>
         </div>
 
         {config.requiresSitePassword ? (
@@ -275,7 +356,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
                 placeholder="https://api.vbcode.io/v1"
                 required
               />
-              <p className="field-help">只填基础地址即可；生成会自动拼 /images/generations，上传图片会自动拼 /images/edits。</p>
+              <p className="field-help">只填 API 的基础地址即可，系统会根据创作模式自动选择对应接口。</p>
             </div>
 
             <div className="field-group">
@@ -300,8 +381,8 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
           </>
         ) : (
           <div className="sealed-notice">
-            <strong>封装版已启用服务器预设接口</strong>
-            <span>前端不会显示或提交 API 地址和 API Key。</span>
+            <strong>已为你准备好创作环境</strong>
+            <span>直接输入描述，选择模式，需要时上传图片即可开始。</span>
           </div>
         )}
 
@@ -314,30 +395,34 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
               <option value="edit">编辑原图</option>
             </select>
           </div>
-          <div className="field-group">
-            <label htmlFor="model">模型</label>
-            <input id="model" value={model} onChange={(event) => updateModel(event.target.value)} />
-          </div>
+          {isConfigurable ? (
+            <div className="field-group">
+              <label htmlFor="model">模型</label>
+              <input id="model" value={model} onChange={(event) => updateModel(event.target.value)} />
+            </div>
+          ) : null}
         </div>
 
-        <div className="settings-row">
-          <div className="field-group">
-            <label htmlFor="size">尺寸（可选）</label>
-            <input id="size" value={size} onChange={(event) => updateSize(event.target.value)} placeholder="1024x1024" />
+        {isConfigurable ? (
+          <div className="settings-row">
+            <div className="field-group">
+              <label htmlFor="size">尺寸（可选）</label>
+              <input id="size" value={size} onChange={(event) => updateSize(event.target.value)} placeholder="1024x1024" />
+            </div>
+            <div className="field-group">
+              <label htmlFor="quality">质量（可选）</label>
+              <input id="quality" value={quality} onChange={(event) => updateQuality(event.target.value)} placeholder="high" />
+            </div>
           </div>
-          <div className="field-group">
-            <label htmlFor="quality">质量（可选）</label>
-            <input id="quality" value={quality} onChange={(event) => updateQuality(event.target.value)} placeholder="high" />
-          </div>
-        </div>
+        ) : null}
 
         <div className="field-group">
-          <label htmlFor="prompt">Prompt</label>
+          <label htmlFor="prompt">创作描述</label>
           <textarea
             id="prompt"
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
-            placeholder="描述你想生成或编辑的图片"
+            placeholder="例如：一张温暖的咖啡馆海报，复古胶片风格，柔和光线"
             rows={7}
             required
           />
@@ -358,7 +443,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
 
         <div className="button-row">
           <button className="primary-button" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "生成中..." : "开始生成"}
+            {isSubmitting ? `生成中... ${countdownSeconds}s` : "开始生成"}
           </button>
           <button className="secondary-button" type="button" onClick={resetForm} disabled={isSubmitting}>
             清空
@@ -366,7 +451,12 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         </div>
       </form>
 
-      <ResultGallery result={result} />
+      <ResultGallery
+        history={history}
+        result={result}
+        onClearHistory={clearHistory}
+        onSelectHistory={(item) => setResult(item.result)}
+      />
     </div>
   );
 }

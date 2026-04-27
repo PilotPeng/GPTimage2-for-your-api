@@ -12,26 +12,26 @@ export default function Home() {
       <section className="hero-card">
         <div className="hero-header">
           <div className="hero-content">
-            <p className="eyebrow">{isSealed ? "GPT-image2 Sealed Studio" : "GPT-image2 Web Studio"}</p>
-            <h1>{isSealed ? "用预设接口生成和编辑图片" : "用你自己的接口生成和编辑图片"}</h1>
+            <p className="eyebrow">AI Image Studio</p>
+            <h1>Let&apos;s GPTImage</h1>
             <p className="hero-copy">
               {isSealed
-                ? "只需输入 prompt 和可选图片，本站后端会使用服务器预设 API 安全转发请求。"
-                : "输入 API 基础地址、prompt 和可选图片后，本站后端会安全转发请求，自动匹配生成或编辑接口。"}
+                ? "写下你的想法，或上传参考图，就能快速生成、改图和创作视觉素材。"
+                : "连接你的图片生成服务，输入想法、上传参考图，一站式完成生成、参考创作和图片编辑。"}
             </p>
           </div>
           <div className="hero-panel" aria-label="功能亮点">
             <div className="feature-pill">
-              <span>自动拼接</span>
-              <strong>/images/generations 或 /images/edits</strong>
+              <span>文字出图</span>
+              <strong>输入一句描述，生成你想要的画面。</strong>
             </div>
             <div className="feature-pill">
-              <span>Key 保护</span>
-              <strong>{isSealed ? "API Key 只保存在服务器环境变量中" : "仅随本次请求转发，不写入本地存储"}</strong>
+              <span>参考创作</span>
+              <strong>支持逐张添加多张参考图，灵感不用一次选完。</strong>
             </div>
             <div className="feature-pill">
-              <span>轻量连通</span>
-              <strong>优先请求 /models，不触发图片生成</strong>
+              <span>图片编辑</span>
+              <strong>{isSealed ? "无需配置，打开页面即可开始创作。" : "保留高级配置，也适合自己的 API 工作流。"}</strong>
             </div>
           </div>
         </div>

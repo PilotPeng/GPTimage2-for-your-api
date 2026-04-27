@@ -44,12 +44,16 @@ export function ImageUploader({ value, allowedTypes, maxBytes, maxCount, maxTota
   const accept = allowedTypes.join(",");
   const totalBytes = useMemo(() => value.reduce((total, file) => total + file.size, 0), [value]);
 
-  const updateSelectedFiles = (files: readonly File[]) => {
+  const appendSelectedFiles = (files: readonly File[]) => {
+    onChange([...value, ...files]);
+  };
+
+  const replaceSelectedFiles = (files: readonly File[]) => {
     onChange([...files]);
   };
 
   const removeFile = (index: number) => {
-    updateSelectedFiles(value.filter((_, currentIndex) => currentIndex !== index));
+    replaceSelectedFiles(value.filter((_, currentIndex) => currentIndex !== index));
   };
 
   return (
@@ -61,7 +65,10 @@ export function ImageUploader({ value, allowedTypes, maxBytes, maxCount, maxTota
         type="file"
         accept={accept}
         multiple
-        onChange={(event) => updateSelectedFiles(Array.from(event.target.files ?? []))}
+        onChange={(event) => {
+          appendSelectedFiles(Array.from(event.target.files ?? []));
+          event.target.value = "";
+        }}
       />
       <p className="field-help">
         支持 {allowedTypes.join("、")}，最多 {maxCount} 张；单张最大 {formatBytes(maxBytes)}，总大小最大 {formatBytes(maxTotalBytes)}。
@@ -71,7 +78,7 @@ export function ImageUploader({ value, allowedTypes, maxBytes, maxCount, maxTota
           <div className="upload-preview-summary">
             <strong>已选择 {value.length} 张图片</strong>
             <span>总大小 {formatBytes(totalBytes)}</span>
-            <button type="button" className="secondary-button" onClick={() => updateSelectedFiles([])}>
+            <button type="button" className="secondary-button" onClick={() => replaceSelectedFiles([])}>
               清空全部
             </button>
           </div>
