@@ -403,18 +403,16 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
           ) : null}
         </div>
 
-        {isConfigurable ? (
-          <div className="settings-row">
-            <div className="field-group">
-              <label htmlFor="size">尺寸（可选）</label>
-              <input id="size" value={size} onChange={(event) => updateSize(event.target.value)} placeholder="1024x1024" />
-            </div>
-            <div className="field-group">
-              <label htmlFor="quality">质量（可选）</label>
-              <input id="quality" value={quality} onChange={(event) => updateQuality(event.target.value)} placeholder="high" />
-            </div>
+        <div className="settings-row">
+          <div className="field-group">
+            <label htmlFor="size">尺寸（可选）</label>
+            <input id="size" value={size} onChange={(event) => updateSize(event.target.value)} placeholder="1024x1024" />
           </div>
-        ) : null}
+          <div className="field-group">
+            <label htmlFor="quality">质量（可选）</label>
+            <input id="quality" value={quality} onChange={(event) => updateQuality(event.target.value)} placeholder="high" />
+          </div>
+        </div>
 
         <div className="field-group">
           <label htmlFor="prompt">创作描述</label>

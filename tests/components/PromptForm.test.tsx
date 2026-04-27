@@ -197,6 +197,9 @@ describe("PromptForm", () => {
 
     await waitFor(() => expect(screen.queryByLabelText("API 基础地址")).not.toBeInTheDocument());
     expect(screen.queryByLabelText("API Key（可选）")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("模型")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("尺寸（可选）")).toBeInTheDocument();
+    expect(screen.getByLabelText("质量（可选）")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("模式"), "reference");
     await userEvent.upload(screen.getByLabelText("上传图片"), [
       new File(["image-1"], "image-1.png", { type: "image/png" }),
