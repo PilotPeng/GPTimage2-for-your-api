@@ -12,6 +12,7 @@ const GENERATION_COUNTDOWN_SECONDS = 180;
 const LEGACY_ACTIVE_JOB_STORAGE_KEY = "gpt-image2.activeJob";
 const getActiveJobStorageKey = (variant: UiMode) => `${LEGACY_ACTIVE_JOB_STORAGE_KEY}.${variant}`;
 const ACTIVE_JOB_NOT_FOUND_LIMIT = 3;
+const ACTIVE_JOB_SUBMIT_GRACE_MS = 60_000;
 
 const fallbackConfig: PublicConfig = {
   defaultApiBaseUrl: "",
@@ -140,6 +141,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
   const [activeJob, setActiveJob] = useState<ActiveImageJob | undefined>(() => initialActiveJob);
   const [jobStatus, setJobStatus] = useState<ImageJobStatus | undefined>(() => initialActiveJob ? "queued" : undefined);
   const activeJobRef = useRef<ActiveImageJob | undefined>(undefined);
+  const isCreatingJobRef = useRef(false);
   const notFoundCountRef = useRef(0);
 
   useEffect(() => {
@@ -304,7 +306,9 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     } catch (pollError) {
       notFoundCountRef.current += 1;
 
-      if (notFoundCountRef.current >= ACTIVE_JOB_NOT_FOUND_LIMIT) {
+      const isWithinSubmitGracePeriod = Date.now() - Date.parse(job.createdAt) < ACTIVE_JOB_SUBMIT_GRACE_MS;
+
+      if (!isWithinSubmitGracePeriod && notFoundCountRef.current >= ACTIVE_JOB_NOT_FOUND_LIMIT) {
         setError(pollError instanceof Error ? pollError.message : "任务已过期或服务器已重启，请重新提交。");
         clearActiveJob();
         setIsSubmitting(false);
@@ -322,7 +326,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
 
     const schedulePoll = async (delayMs: number) => {
       timeoutId = window.setTimeout(async () => {
-        if (isCancelled || !activeJobRef.current) {
+        if (isCancelled || !activeJobRef.current || isCreatingJobRef.current) {
           return;
         }
 
@@ -347,7 +351,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
 
   useEffect(() => {
     const pollCurrentJob = () => {
-      if (activeJobRef.current) {
+      if (activeJobRef.current && !isCreatingJobRef.current) {
         void pollImageJob(activeJobRef.current);
       }
     };
@@ -460,6 +464,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     setError("");
     setConnectivityMessage("");
     setResult(undefined);
+    isCreatingJobRef.current = true;
     persistActiveJob(job);
 
     try {
@@ -467,8 +472,10 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
       const nextJob = { ...job, retryAfterMs: createdJob.retryAfterMs };
       setJobStatus(createdJob.status);
       persistActiveJob(nextJob);
+      isCreatingJobRef.current = false;
       await pollImageJob(nextJob);
     } catch (submitError) {
+      isCreatingJobRef.current = false;
       await pollImageJob(job);
 
       if (activeJobRef.current?.jobId !== job.jobId) {

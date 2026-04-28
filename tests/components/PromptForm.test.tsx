@@ -297,6 +297,7 @@ describe("PromptForm", () => {
     await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
     expect(screen.getByRole("button", { name: "排队中... 180s" })).toBeDisabled();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/config", "/api/images"]);
     resolveJob(new Response(JSON.stringify({ jobId: "job-1", status: "queued", statusUrl: "api/images/jobs/job-1", retryAfterMs: 1 }), { status: 202 }));
   });
 
