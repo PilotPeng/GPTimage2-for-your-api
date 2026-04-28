@@ -9,7 +9,8 @@ import { clearGenerationHistory, getGenerationHistory, saveGenerationHistoryItem
 import type { ClientImageRequest, GenerationHistoryItem, ImageGenerationResponse, ImageJobStatus, ImageMode, UiMode } from "@/lib/shared/types";
 
 const GENERATION_COUNTDOWN_SECONDS = 180;
-const ACTIVE_JOB_STORAGE_KEY = "gpt-image2.activeJob";
+const LEGACY_ACTIVE_JOB_STORAGE_KEY = "gpt-image2.activeJob";
+const getActiveJobStorageKey = (variant: UiMode) => `${LEGACY_ACTIVE_JOB_STORAGE_KEY}.${variant}`;
 const ACTIVE_JOB_NOT_FOUND_LIMIT = 3;
 
 const fallbackConfig: PublicConfig = {
@@ -132,7 +133,8 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
   const [error, setError] = useState("");
   const [connectivityMessage, setConnectivityMessage] = useState("");
   const [isTestingConnectivity, setIsTestingConnectivity] = useState(false);
-  const initialActiveJob = typeof window === "undefined" ? undefined : parseActiveJob(window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY));
+  const activeJobStorageKey = getActiveJobStorageKey(variant);
+  const initialActiveJob = typeof window === "undefined" ? undefined : parseActiveJob(window.localStorage.getItem(activeJobStorageKey));
   const [isSubmitting, setIsSubmitting] = useState(() => Boolean(initialActiveJob));
   const [countdownSeconds, setCountdownSeconds] = useState(GENERATION_COUNTDOWN_SECONDS);
   const [activeJob, setActiveJob] = useState<ActiveImageJob | undefined>(() => initialActiveJob);
@@ -238,17 +240,19 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     }
   };
 
-  const persistActiveJob = (job: ActiveImageJob) => {
+  const persistActiveJob = useCallback((job: ActiveImageJob) => {
     setActiveJob(job);
-    window.localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify(job));
-  };
+    window.localStorage.setItem(activeJobStorageKey, JSON.stringify(job));
+    window.localStorage.removeItem(LEGACY_ACTIVE_JOB_STORAGE_KEY);
+  }, [activeJobStorageKey]);
 
-  const clearActiveJob = () => {
+  const clearActiveJob = useCallback(() => {
     setActiveJob(undefined);
     setJobStatus(undefined);
-    window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+    window.localStorage.removeItem(activeJobStorageKey);
+    window.localStorage.removeItem(LEGACY_ACTIVE_JOB_STORAGE_KEY);
     notFoundCountRef.current = 0;
-  };
+  }, [activeJobStorageKey]);
 
   const saveHistoryItem = async (item: GenerationHistoryItem) => {
     setHistory((currentHistory) => [item, ...currentHistory.filter((historyItem) => historyItem.id !== item.id)].slice(0, MAX_HISTORY_ITEMS));
@@ -275,7 +279,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     void saveHistoryItem(createHistoryItem(job.prompt, job.mode, response));
     clearActiveJob();
     setIsSubmitting(false);
-  }, []);
+  }, [clearActiveJob]);
 
   const pollImageJob = useCallback(async (job: ActiveImageJob) => {
     try {
@@ -306,7 +310,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         setIsSubmitting(false);
       }
     }
-  }, [completeImageJob]);
+  }, [clearActiveJob, completeImageJob, persistActiveJob]);
 
   useEffect(() => {
     if (!activeJob || !isSubmitting) {

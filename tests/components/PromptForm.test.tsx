@@ -166,7 +166,7 @@ describe("PromptForm", () => {
   });
 
   it("resumes active image jobs after refresh", async () => {
-    window.localStorage.setItem("gpt-image2.activeJob", JSON.stringify({
+    window.localStorage.setItem("gpt-image2.activeJob.configurable", JSON.stringify({
       jobId: "job-resume",
       prompt: "resume prompt",
       mode: "generate",
@@ -189,6 +189,25 @@ describe("PromptForm", () => {
 
     expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "https://cdn.example.com/resume.png");
     expect(saveGenerationHistoryItemMock).toHaveBeenCalledWith(expect.objectContaining({ prompt: "resume prompt" }));
+  });
+
+  it("does not resume sealed jobs from the configurable app", async () => {
+    window.localStorage.setItem("gpt-image2.activeJob.sealed", JSON.stringify({
+      jobId: "sealed-job-resume",
+      prompt: "sealed resume prompt",
+      mode: "generate",
+      createdAt: "2026-04-27T08:00:00.000Z",
+      retryAfterMs: 1,
+    }));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(publicConfig), { status: 200 }),
+    );
+
+    render(<PromptForm />);
+
+    await waitFor(() => expect(screen.getByLabelText("API 基础地址")).toHaveValue(publicConfig.defaultApiBaseUrl));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/config"]);
+    expect(screen.getByRole("button", { name: "开始生成" })).toBeEnabled();
   });
 
   it("runs connectivity tests without submitting the form", async () => {
