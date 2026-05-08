@@ -9,6 +9,13 @@ export type UserStatus = "active" | "disabled";
 export type PaymentProvider = "alipay";
 export type PaymentOrderStatus = "pending" | "paid" | "expired" | "cancelled" | "refunded";
 
+export type ManualPaymentConfig = Readonly<{
+  enabled: boolean;
+  qrImageUrl: string;
+  title: string;
+  description: string;
+}>;
+
 export type GeneratedImage = Readonly<{
   url?: string;
   b64?: string;
@@ -198,6 +205,12 @@ export type CreateOrderRequest = Readonly<{
 export type CreateOrderResponse = Readonly<{
   order: PaymentOrderSummary;
   checkoutUrl: string;
+}>;
+
+export type OrdersResponse = Readonly<{
+  packs: readonly PaymentPack[];
+  orders: readonly PaymentOrderSummary[];
+  manualPayment: ManualPaymentConfig;
 }>;
 
 export type ClientImageRequest = Readonly<{

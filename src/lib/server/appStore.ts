@@ -133,6 +133,10 @@ const createId = (prefix: string) => {
 };
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
+const isUniqueEmailViolation = (error: unknown) => error instanceof Error
+  && "code" in error
+  && (error as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE"
+  && error.message.includes("users.email");
 
 const toCurrentUser = (row: AppUserRow): CurrentUser => ({
   id: row.id,
@@ -212,30 +216,38 @@ export class AppStore {
     const id = createId("user");
     const email = normalizeEmail(input.email);
 
-    this.database.transaction(() => {
-      this.database.prepare(`
-        INSERT INTO users (id, email, password_hash, role, status, created_at, updated_at, last_login_at)
-        VALUES (@id, @email, @passwordHash, @role, 'active', @now, @now, NULL)
-      `).run({ id, email, passwordHash: input.passwordHash, role: input.role ?? "user", now });
+    try {
+      this.database.transaction(() => {
+        this.database.prepare(`
+          INSERT INTO users (id, email, password_hash, role, status, created_at, updated_at, last_login_at)
+          VALUES (@id, @email, @passwordHash, @role, 'active', @now, @now, NULL)
+        `).run({ id, email, passwordHash: input.passwordHash, role: input.role ?? "user", now });
 
-      this.database.prepare(`
-        INSERT INTO credit_accounts (user_id, balance, created_at, updated_at)
-        VALUES (@userId, 0, @now, @now)
-      `).run({ userId: id, now });
+        this.database.prepare(`
+          INSERT INTO credit_accounts (user_id, balance, created_at, updated_at)
+          VALUES (@userId, 0, @now, @now)
+        `).run({ userId: id, now });
 
-      if (input.initialCredits > 0) {
-        this.addCredits({
-          userId: id,
-          delta: input.initialCredits,
-          type: "admin_credit",
-          referenceType: "bootstrap",
-          referenceId: id,
-          idempotencyKey: `bootstrap:${id}`,
-          memo: "初始赠送额度",
-          createdBy: null,
-        });
+        if (input.initialCredits > 0) {
+          this.addCredits({
+            userId: id,
+            delta: input.initialCredits,
+            type: "admin_credit",
+            referenceType: "bootstrap",
+            referenceId: id,
+            idempotencyKey: `bootstrap:${id}`,
+            memo: "初始赠送额度",
+            createdBy: null,
+          });
+        }
+      })();
+    } catch (error) {
+      if (isUniqueEmailViolation(error)) {
+        throw new AppError(409, "EMAIL_ALREADY_REGISTERED", "该邮箱已注册，请直接登录。");
       }
-    })();
+
+      throw error;
+    }
 
     const user = this.getUserById(id);
 

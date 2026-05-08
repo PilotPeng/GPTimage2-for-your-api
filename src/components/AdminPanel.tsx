@@ -91,9 +91,9 @@ export function AdminPanel() {
       </form>
       <div className="history-list">
         {users.map((user) => (
-          <button type="button" className="history-item" key={user.id} onClick={() => setSelectedUserId(user.id)}>
+          <button type="button" className="history-item admin-user-item" key={user.id} onClick={() => setSelectedUserId(user.id)}>
             <span>
-              <strong>{user.email}</strong>
+              <strong title={user.email}>{user.email}</strong>
               <small>{user.role} · {user.balance} 点</small>
             </span>
           </button>

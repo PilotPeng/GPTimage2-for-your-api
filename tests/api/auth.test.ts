@@ -91,6 +91,24 @@ describe("auth API", () => {
     expect(meBody.user.email).toBe("new@example.com");
   });
 
+  it("rejects duplicate registration with normalized email", async () => {
+    process.env.ALLOW_SELF_REGISTRATION = "true";
+
+    const firstResponse = await REGISTER(new Request("http://localhost/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email: "duplicate@example.com", password: "password123" }),
+    }));
+    const duplicateResponse = await REGISTER(new Request("http://localhost/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email: " DUPLICATE@example.com ", password: "password123" }),
+    }));
+    const body = await duplicateResponse.json();
+
+    expect(firstResponse.status).toBe(201);
+    expect(duplicateResponse.status).toBe(409);
+    expect(body.error.code).toBe("EMAIL_ALREADY_REGISTERED");
+  });
+
   it("rejects registration when self registration is disabled", async () => {
     const registerResponse = await REGISTER(new Request("http://localhost/api/auth/register", {
       method: "POST",

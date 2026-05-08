@@ -71,6 +71,9 @@ const createConfig = (): ServerConfig => ({
   alipayPrivateKey: privateKey,
   alipayPublicKey: publicKey,
   alipayGatewayUrl: "https://openapi.alipay.com/gateway.do",
+  manualPaymentQrUrl: "",
+  manualPaymentTitle: "扫码付款后联系管理员加额度",
+  manualPaymentDescription: "请备注注册邮箱或订单信息，管理员确认到账后会手动为你的账户添加额度。",
 });
 
 const createWebhookBody = (overrides: Partial<Record<string, string>> = {}) => {

@@ -27,6 +27,12 @@ const fallbackConfig: PublicConfig = {
   apiSettingsEditable: true,
   serverApiConfigured: false,
   billingEnabled: false,
+  manualPayment: {
+    enabled: false,
+    qrImageUrl: "",
+    title: "",
+    description: "",
+  },
 };
 
 const storageKeys = {

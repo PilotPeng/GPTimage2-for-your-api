@@ -17,6 +17,9 @@ afterEach(() => {
   delete process.env.GPT_IMAGE2_UI_MODE;
   delete process.env.GPT_IMAGE2_API_BASE_URL;
   delete process.env.GPT_IMAGE2_API_KEY;
+  delete process.env.MANUAL_PAYMENT_QR_URL;
+  delete process.env.MANUAL_PAYMENT_TITLE;
+  delete process.env.MANUAL_PAYMENT_DESCRIPTION;
 });
 
 describe("GET /api/config", () => {
@@ -29,6 +32,23 @@ describe("GET /api/config", () => {
     expect(body.serverApiConfigured).toBe(true);
     expect(body.maxUploadCount).toBe(4);
     expect(body.maxTotalUploadBytes).toBe(41_943_040);
+    expect(body.manualPayment.enabled).toBe(false);
+  });
+
+  it("exposes manual payment QR config", async () => {
+    process.env.MANUAL_PAYMENT_QR_URL = "https://example.com/qr.png";
+    process.env.MANUAL_PAYMENT_TITLE = "扫码付款";
+    process.env.MANUAL_PAYMENT_DESCRIPTION = "备注邮箱";
+
+    const response = GET();
+    const body = await response.json();
+
+    expect(body.manualPayment).toEqual({
+      enabled: true,
+      qrImageUrl: "https://example.com/qr.png",
+      title: "扫码付款",
+      description: "备注邮箱",
+    });
   });
 
   it("does not expose the default API base URL in sealed mode", async () => {

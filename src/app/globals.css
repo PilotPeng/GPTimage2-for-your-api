@@ -253,6 +253,39 @@ h1 {
   align-content: start;
 }
 
+.manual-payment-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 18px;
+  background: var(--card-soft);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+}
+
+.manual-payment-card h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.manual-payment-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.manual-payment-card img {
+  width: 180px;
+  height: 180px;
+  object-fit: contain;
+  justify-self: end;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+}
+
 .link-button {
   display: inline-grid;
   align-items: center;
@@ -630,6 +663,11 @@ h1 {
   color: var(--muted);
 }
 
+.admin-user-item strong {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 @media (max-width: 960px) {
   .hero-header,
   .workspace-grid,
@@ -644,6 +682,14 @@ h1 {
   .section-heading span {
     max-width: none;
     text-align: left;
+  }
+
+  .manual-payment-card {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-payment-card img {
+    justify-self: start;
   }
 }
 

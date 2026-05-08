@@ -17,5 +17,11 @@ export function GET() {
     apiSettingsEditable: config.uiMode === "configurable",
     serverApiConfigured: Boolean(config.defaultApiBaseUrl && config.defaultApiKey),
     billingEnabled: config.billingEnabled,
+    manualPayment: {
+      enabled: Boolean(config.manualPaymentQrUrl),
+      qrImageUrl: config.manualPaymentQrUrl,
+      title: config.manualPaymentTitle,
+      description: config.manualPaymentDescription,
+    },
   });
 }

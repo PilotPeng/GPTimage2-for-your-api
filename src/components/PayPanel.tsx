@@ -3,19 +3,27 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createOrder, fetchOrders } from "@/lib/client/imageApi";
-import type { PaymentOrderSummary, PaymentPack } from "@/lib/shared/types";
+import type { ManualPaymentConfig, PaymentOrderSummary, PaymentPack } from "@/lib/shared/types";
 import { ErrorMessage } from "./ErrorMessage";
 
 type OrdersState = Readonly<{
   packs: readonly PaymentPack[];
   orders: readonly PaymentOrderSummary[];
+  manualPayment: ManualPaymentConfig;
 }>;
+
+const emptyManualPayment: ManualPaymentConfig = {
+  enabled: false,
+  qrImageUrl: "",
+  title: "",
+  description: "",
+};
 
 const formatMoney = (amountCents: number, currency: string) => `${(amountCents / 100).toFixed(2)} ${currency}`;
 
 export function PayPanel() {
   const router = useRouter();
-  const [state, setState] = useState<OrdersState>({ packs: [], orders: [] });
+  const [state, setState] = useState<OrdersState>({ packs: [], orders: [], manualPayment: emptyManualPayment });
   const [error, setError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 
@@ -59,6 +67,15 @@ export function PayPanel() {
         <span>当前接入支付宝网页支付，到账以支付通知为准。</span>
       </div>
       <ErrorMessage message={error} />
+      {state.manualPayment.enabled ? (
+        <article className="manual-payment-card">
+          <div>
+            <h3>{state.manualPayment.title}</h3>
+            <p>{state.manualPayment.description}</p>
+          </div>
+          <img src={state.manualPayment.qrImageUrl} alt="管理员收款二维码" />
+        </article>
+      ) : null}
       <div className="pack-grid">
         {state.packs.map((pack) => (
           <article className="feature-pill pack-card" key={pack.id}>

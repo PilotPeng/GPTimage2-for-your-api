@@ -24,6 +24,12 @@ export async function GET(request: Request) {
     return NextResponse.json({
       packs: listPaymentPacks(config),
       orders: getAppStore(config.appDbPath).listOrders(user.id, 50),
+      manualPayment: {
+        enabled: Boolean(config.manualPaymentQrUrl),
+        qrImageUrl: config.manualPaymentQrUrl,
+        title: config.manualPaymentTitle,
+        description: config.manualPaymentDescription,
+      },
     });
   } catch (error) {
     return createErrorResponse(error);

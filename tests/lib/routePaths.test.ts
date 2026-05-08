@@ -19,4 +19,11 @@ describe("routePaths", () => {
     expect(getRoutePath("/login")).toBe("/sealed/login");
     expect(getRoutePath("/")).toBe("/sealed");
   });
+
+  it("preserves the fengzhuang prefix", () => {
+    window.history.replaceState(null, "", "/fengzhuang/pay");
+
+    expect(getRoutePath("/login")).toBe("/fengzhuang/login");
+    expect(getRoutePath("/")).toBe("/fengzhuang");
+  });
 });

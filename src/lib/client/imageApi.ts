@@ -1,3 +1,4 @@
+import { getCurrentRoutePrefix } from "./routePaths";
 import type {
   AccountSummaryResponse,
   ActivationCodeCreateRequest,
@@ -16,10 +17,9 @@ import type {
   ImageJobStatusResponse,
   LoginRequest,
   LoginResponse,
+  OrdersResponse,
   RegisterRequest,
   RegisterResponse,
-  PaymentOrderSummary,
-  PaymentPack,
   UserListResponse,
 } from "@/lib/shared/types";
 
@@ -34,11 +34,7 @@ export type PublicConfig = Readonly<{
   apiSettingsEditable: boolean;
   serverApiConfigured: boolean;
   billingEnabled: boolean;
-}>;
-
-type OrdersResponse = Readonly<{
-  packs: readonly PaymentPack[];
-  orders: readonly PaymentOrderSummary[];
+  manualPayment: OrdersResponse["manualPayment"];
 }>;
 
 const getApiPath = (path: string) => {
@@ -48,8 +44,7 @@ const getApiPath = (path: string) => {
     return `/${normalizedPath}`;
   }
 
-  const currentPath = window.location.pathname;
-  const prefix = currentPath === "/sealed" || currentPath.startsWith("/sealed/") ? "/sealed" : "";
+  const prefix = getCurrentRoutePrefix();
   return `${prefix}/${normalizedPath}`;
 };
 
