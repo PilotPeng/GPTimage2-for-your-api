@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/server/auth";
+import { assertJobOwner } from "@/lib/server/billing";
 import { getServerConfig } from "@/lib/server/config";
 import { createErrorResponse, AppError } from "@/lib/server/errors";
 import { getImageJob, wakeImageJobWorker } from "@/lib/server/imageJobQueue";
@@ -11,10 +13,16 @@ type RouteContext = Readonly<{
   }>;
 }>;
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   try {
     const { jobId } = await context.params;
     const config = getServerConfig();
+
+    if (config.billingEnabled) {
+      const user = await requireUser(request, config);
+      assertJobOwner(jobId, user.id, config);
+    }
+
     wakeImageJobWorker(config);
     const job = getImageJob(jobId, config);
 

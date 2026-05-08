@@ -25,6 +25,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  padding-top: 64px;
   color: var(--foreground);
   background:
     radial-gradient(circle at 12% 8%, rgb(116 127 255 / 24%), transparent 30rem),
@@ -47,6 +48,39 @@ button {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
+}
+
+.app-nav {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 10;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  background: rgb(255 255 255 / 78%);
+  border: 1px solid rgb(255 255 255 / 82%);
+  border-radius: 999px;
+  box-shadow: 0 14px 42px rgb(31 44 86 / 12%);
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.app-nav a,
+.text-link {
+  color: var(--primary-dark);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.app-nav a {
+  padding: 8px 12px;
+  border-radius: 999px;
+}
+
+.app-nav a:hover {
+  background: var(--primary-soft);
 }
 
 .page-shell {
@@ -168,6 +202,61 @@ h1 {
 
 .generator-card {
   backdrop-filter: blur(14px);
+}
+
+.narrow-card {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.account-grid,
+.admin-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.balance-card {
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+  background: linear-gradient(135deg, rgb(91 92 246 / 12%), rgb(22 184 166 / 12%));
+  border: 1px solid rgb(91 92 246 / 18%);
+  border-radius: 22px;
+}
+
+.balance-card span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.balance-card strong {
+  font-size: clamp(2rem, 6vw, 3.6rem);
+  letter-spacing: -0.05em;
+}
+
+.redeem-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: var(--card-soft);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+}
+
+.pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.pack-card {
+  align-content: start;
+}
+
+.link-button {
+  display: inline-grid;
+  align-items: center;
+  text-decoration: none;
 }
 
 .section-heading {
@@ -519,6 +608,10 @@ h1 {
   height: 64px;
   object-fit: cover;
   border-radius: 14px;
+}
+
+.ledger-item {
+  grid-template-columns: 1fr auto;
 }
 
 .history-item span {

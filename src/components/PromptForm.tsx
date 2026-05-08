@@ -4,15 +4,17 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ErrorMessage } from "./ErrorMessage";
 import { ImageUploader } from "./ImageUploader";
 import { ResultGallery } from "./ResultGallery";
-import { createImageJob, fetchImageJob, fetchPublicConfig, testConnectivity, type PublicConfig } from "@/lib/client/imageApi";
+import { createImageJob, fetchAccount, fetchImageJob, fetchPublicConfig, testConnectivity, type PublicConfig } from "@/lib/client/imageApi";
 import { clearGenerationHistory, getGenerationHistory, saveGenerationHistoryItem } from "@/lib/client/historyStore";
-import type { ClientImageRequest, GenerationHistoryItem, ImageGenerationResponse, ImageJobStatus, ImageMode, UiMode } from "@/lib/shared/types";
+import { getRoutePath } from "@/lib/client/routePaths";
+import type { AccountSummaryResponse, ClientImageRequest, GenerationHistoryItem, ImageGenerationResponse, ImageJobStatus, ImageMode, UiMode } from "@/lib/shared/types";
 
 const GENERATION_COUNTDOWN_SECONDS = 180;
 const LEGACY_ACTIVE_JOB_STORAGE_KEY = "gpt-image2.activeJob";
 const getActiveJobStorageKey = (variant: UiMode) => `${LEGACY_ACTIVE_JOB_STORAGE_KEY}.${variant}`;
 const ACTIVE_JOB_NOT_FOUND_LIMIT = 3;
 const ACTIVE_JOB_SUBMIT_GRACE_MS = 60_000;
+const TRANSIENT_SUBMIT_ERROR_PATTERNS = ["Load failed", "Failed to fetch", "NetworkError"] as const;
 
 const fallbackConfig: PublicConfig = {
   defaultApiBaseUrl: "",
@@ -24,6 +26,7 @@ const fallbackConfig: PublicConfig = {
   allowedImageMimeTypes: ["image/png", "image/jpeg", "image/webp"],
   apiSettingsEditable: true,
   serverApiConfigured: false,
+  billingEnabled: false,
 };
 
 const storageKeys = {
@@ -75,6 +78,9 @@ const createHistoryItem = (prompt: string, mode: ImageMode, result: ImageGenerat
   createdAt: new Date().toISOString(),
   result,
 });
+
+const isRecoverableSubmitError = (error: unknown) => error instanceof Error
+  && TRANSIENT_SUBMIT_ERROR_PATTERNS.some((pattern) => error.message.includes(pattern));
 
 type ActiveImageJob = Readonly<{
   jobId: string;
@@ -131,6 +137,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
   const [images, setImages] = useState<File[]>([]);
   const [result, setResult] = useState<ImageGenerationResponse>();
   const [history, setHistory] = useState<GenerationHistoryItem[]>([]);
+  const [account, setAccount] = useState<AccountSummaryResponse>();
   const [error, setError] = useState("");
   const [connectivityMessage, setConnectivityMessage] = useState("");
   const [isTestingConnectivity, setIsTestingConnectivity] = useState(false);
@@ -159,6 +166,18 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
 
     return () => window.clearInterval(intervalId);
   }, [isSubmitting]);
+
+  const refreshAccount = useCallback(async () => {
+    if (!config.billingEnabled) {
+      return;
+    }
+
+    try {
+      setAccount(await fetchAccount());
+    } catch {
+      setAccount(undefined);
+    }
+  }, [config.billingEnabled]);
 
   useEffect(() => {
     let isMounted = true;
@@ -190,6 +209,10 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         setModel(storedModel || publicConfig.defaultModel);
         setSize(getStoredValue(storageKeys.size));
         setQuality(getStoredValue(storageKeys.quality));
+
+        if (publicConfig.billingEnabled) {
+          void fetchAccount().then(setAccount).catch(() => setAccount(undefined));
+        }
       })
       .catch(() => {
         if (!isMounted) {
@@ -243,12 +266,14 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
   };
 
   const persistActiveJob = useCallback((job: ActiveImageJob) => {
+    activeJobRef.current = job;
     setActiveJob(job);
     window.localStorage.setItem(activeJobStorageKey, JSON.stringify(job));
     window.localStorage.removeItem(LEGACY_ACTIVE_JOB_STORAGE_KEY);
   }, [activeJobStorageKey]);
 
   const clearActiveJob = useCallback(() => {
+    activeJobRef.current = undefined;
     setActiveJob(undefined);
     setJobStatus(undefined);
     window.localStorage.removeItem(activeJobStorageKey);
@@ -279,9 +304,10 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
   const completeImageJob = useCallback((job: ActiveImageJob, response: ImageGenerationResponse) => {
     setResult(response);
     void saveHistoryItem(createHistoryItem(job.prompt, job.mode, response));
+    void refreshAccount();
     clearActiveJob();
     setIsSubmitting(false);
-  }, [clearActiveJob]);
+  }, [clearActiveJob, refreshAccount]);
 
   const pollImageJob = useCallback(async (job: ActiveImageJob) => {
     try {
@@ -296,6 +322,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
 
       if (response.status === "failed") {
         setError(response.error?.message ?? "生成失败，请稍后重试。");
+        void refreshAccount();
         clearActiveJob();
         setIsSubmitting(false);
         return;
@@ -314,7 +341,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         setIsSubmitting(false);
       }
     }
-  }, [clearActiveJob, completeImageJob, persistActiveJob]);
+  }, [clearActiveJob, completeImageJob, persistActiveJob, refreshAccount]);
 
   useEffect(() => {
     if (!activeJob || !isSubmitting) {
@@ -372,6 +399,14 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
 
     if (!isConfigurable && !config.serverApiConfigured) {
       return "服务器还没有配置默认 API 地址或 API Key。";
+    }
+
+    if (config.billingEnabled && !account) {
+      return "请先登录并确认账户额度。";
+    }
+
+    if (config.billingEnabled && account && account.balance <= 0) {
+      return "额度不足，请先充值。";
     }
 
     if (!prompt.trim()) {
@@ -472,16 +507,24 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
       const nextJob = { ...job, retryAfterMs: createdJob.retryAfterMs };
       setJobStatus(createdJob.status);
       persistActiveJob(nextJob);
+      void refreshAccount();
       isCreatingJobRef.current = false;
       await pollImageJob(nextJob);
     } catch (submitError) {
       isCreatingJobRef.current = false;
-      await pollImageJob(job);
 
-      if (activeJobRef.current?.jobId !== job.jobId) {
-        return;
+      if (isRecoverableSubmitError(submitError)) {
+        await pollImageJob(job);
+
+        if (activeJobRef.current?.jobId !== job.jobId) {
+          return;
+        }
+      } else {
+        clearActiveJob();
+        setIsSubmitting(false);
       }
 
+      void refreshAccount();
       setError(submitError instanceof Error ? submitError.message : "生成任务提交失败，请稍后重试。");
     }
   };
@@ -528,6 +571,14 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
               onChange={(event) => updateSitePassword(event.target.value)}
               placeholder="部署时配置的访问密码"
             />
+          </div>
+        ) : null}
+
+        {config.billingEnabled ? (
+          <div className="sealed-notice">
+            <strong>{account ? `账户余额：${account.balance} 点` : "请先登录后生成"}</strong>
+            <span>{account ? "每次提交会由后端预扣额度，失败自动退回。" : "登录后可查看余额、充值并开始创作。"}</span>
+            {account ? <a className="text-link" href={getRoutePath("/account")}>查看账户</a> : <a className="text-link" href={getRoutePath("/login")}>去登录</a>}
           </div>
         ) : null}
 
@@ -628,7 +679,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         <ErrorMessage message={error} />
 
         <div className="button-row">
-          <button className="primary-button" type="submit" disabled={isSubmitting}>
+          <button className="primary-button" type="submit" disabled={isSubmitting || (config.billingEnabled && !account)}>
             {getSubmitButtonLabel()}
           </button>
           <button className="secondary-button" type="button" onClick={resetForm} disabled={isSubmitting}>

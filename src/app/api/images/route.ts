@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/server/auth";
+import { refundGenerationCharge, reserveGenerationCredits } from "@/lib/server/billing";
 import { getServerConfig } from "@/lib/server/config";
 import { createErrorResponse, AppError } from "@/lib/server/errors";
 import { createImageJobId, enqueueImageJob } from "@/lib/server/imageJobQueue";
@@ -45,7 +47,9 @@ export async function POST(request: Request) {
     const config = getServerConfig();
     verifyRequestSize(request, config.maxTotalUploadBytes);
 
+    const user = config.billingEnabled ? await requireUser(request, config) : undefined;
     const formData = await request.formData();
+    const jobId = getFormJobId(formData);
     const input = await parseImageRequest(formData, {
       allowedImageMimeTypes: config.allowedImageMimeTypes,
       maxUploadBytes: config.maxUploadBytes,
@@ -58,9 +62,20 @@ export async function POST(request: Request) {
 
     verifySiteAccess(input.sitePassword, config.siteAccessPassword);
 
-    const job = enqueueImageJob(getFormJobId(formData), input, config);
+    if (user) {
+      reserveGenerationCredits({ userId: user.id, jobId, mode: input.mode, config });
+    }
 
-    return NextResponse.json(job, { status: 202 });
+    try {
+      const job = enqueueImageJob(jobId, input, config);
+      return NextResponse.json(job, { status: 202 });
+    } catch (error) {
+      if (user) {
+        refundGenerationCharge(jobId, config, "任务创建失败，退回预扣额度。");
+      }
+
+      throw error;
+    }
   } catch (error) {
     return createErrorResponse(error);
   }

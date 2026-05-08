@@ -16,5 +16,6 @@ export function GET() {
     allowedImageMimeTypes: config.allowedImageMimeTypes,
     apiSettingsEditable: config.uiMode === "configurable",
     serverApiConfigured: Boolean(config.defaultApiBaseUrl && config.defaultApiKey),
+    billingEnabled: config.billingEnabled,
   });
 }

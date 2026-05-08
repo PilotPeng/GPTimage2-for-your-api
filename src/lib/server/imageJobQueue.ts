@@ -1,3 +1,4 @@
+import { finalizeGenerationCharge, refundGenerationCharge } from "./billing";
 import { AppError } from "./errors";
 import { generateImage } from "./gptImage2Client";
 import { getImageJobStore } from "./imageJobStore";
@@ -122,11 +123,14 @@ const processOneJob = async (config: ServerConfig) => {
       requestTimeoutMs: config.requestTimeoutMs,
     });
     store.markSucceeded(job.id, result, config.imageJobResultTtlMs);
+    finalizeGenerationCharge(job.id, config);
   } catch (error) {
     if (error instanceof AppError) {
       store.markFailed(job.id, error.code, error.message, config.imageJobResultTtlMs);
+      refundGenerationCharge(job.id, config, error.message);
     } else {
       store.markFailed(job.id, "IMAGE_JOB_FAILED", "生成失败，请稍后重试。", config.imageJobResultTtlMs);
+      refundGenerationCharge(job.id, config);
     }
   }
 

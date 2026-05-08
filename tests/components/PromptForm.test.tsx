@@ -25,6 +25,7 @@ const publicConfig = {
   allowedImageMimeTypes: ["image/png", "image/jpeg", "image/webp"],
   apiSettingsEditable: true,
   serverApiConfigured: true,
+  billingEnabled: false,
 };
 
 beforeEach(() => {
@@ -281,6 +282,23 @@ describe("PromptForm", () => {
     expect(formData.get("image[]")).toBeNull();
   });
 
+  it("shows paid account balance when billing is enabled", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...publicConfig, billingEnabled: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        user: { id: "user-1", email: "user@example.com", role: "user", status: "active", createdAt: "2026-04-27T08:00:00.000Z", updatedAt: "2026-04-27T08:00:00.000Z", lastLoginAt: null },
+        balance: 3,
+        ledgerEntries: [],
+        orders: [],
+      }), { status: 200 }));
+
+    render(<PromptForm />);
+
+    expect(await screen.findByText("账户余额：3 点")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始生成" })).toBeEnabled();
+  });
+
   it("shows a 180 second countdown while queued", async () => {
     let resolveJob: (response: Response) => void = () => undefined;
     const fetchMock = vi.spyOn(globalThis, "fetch");
@@ -299,6 +317,24 @@ describe("PromptForm", () => {
     expect(screen.getByRole("button", { name: "排队中... 180s" })).toBeDisabled();
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/config", "/api/images"]);
     resolveJob(new Response(JSON.stringify({ jobId: "job-1", status: "queued", statusUrl: "api/images/jobs/job-1", retryAfterMs: 1 }), { status: 202 }));
+  });
+
+  it("resets submit state after non-recoverable create failures", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(publicConfig), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "INVALID_REQUEST", message: "请求参数无效。" } }), { status: 400 }));
+
+    render(<PromptForm />);
+
+    await waitFor(() => expect(screen.getByLabelText("API 基础地址")).toHaveValue(publicConfig.defaultApiBaseUrl));
+    await userEvent.type(screen.getByLabelText("创作描述"), "invalid submit prompt");
+    await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("请求参数无效。");
+    expect(screen.getByRole("button", { name: "开始生成" })).toBeEnabled();
+    expect(window.localStorage.getItem("gpt-image2.activeJob.configurable")).toBeNull();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/config", "/api/images"]);
   });
 
   it("clears selected images when switching back to generate mode", async () => {
