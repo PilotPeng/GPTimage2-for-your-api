@@ -20,6 +20,7 @@ const emptyManualPayment: ManualPaymentConfig = {
 };
 
 const formatMoney = (amountCents: number, currency: string) => `${(amountCents / 100).toFixed(2)} ${currency}`;
+const getApproxImageCount = (credits: number) => Math.floor(credits);
 
 export function PayPanel() {
   const router = useRouter();
@@ -81,6 +82,7 @@ export function PayPanel() {
           <article className="feature-pill pack-card" key={pack.id}>
             <span>{pack.title ?? `${pack.credits} 点额度`}</span>
             <strong>{formatMoney(pack.amountCents, pack.currency)}</strong>
+            <p className="field-help">{pack.credits} 点额度，约可生成 {getApproxImageCount(pack.credits)} 张图片</p>
             {pack.description ? <p className="field-help">{pack.description}</p> : null}
             <button className="primary-button" type="button" disabled={isCreating} onClick={() => handleCreateOrder(pack.id)}>
               {isCreating ? "创建中..." : "立即充值"}
