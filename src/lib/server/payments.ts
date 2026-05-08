@@ -7,8 +7,8 @@ import type { ServerConfig } from "./config";
 const createId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const toIsoString = (timeMs: number) => new Date(timeMs).toISOString();
 const normalizeCurrency = (currency: string) => currency.trim().toUpperCase();
-const normalizeAlipayBody = (body: Record<string, string>) => Object.keys(body)
-  .filter((key) => key !== "sign" && key !== "sign_type" && body[key] !== undefined && body[key] !== "")
+const normalizeAlipayBody = (body: Record<string, string>, options: Readonly<{ includeSignType: boolean }>) => Object.keys(body)
+  .filter((key) => key !== "sign" && (options.includeSignType || key !== "sign_type") && body[key] !== undefined && body[key] !== "")
   .sort()
   .map((key) => `${key}=${body[key]}`)
   .join("&");
@@ -50,7 +50,7 @@ const findPack = (packId: string, config: ServerConfig) => {
 
 const createAlipaySignature = (params: Record<string, string>, privateKey: string) => crypto
   .createSign("RSA-SHA256")
-  .update(normalizeAlipayBody(params), "utf8")
+  .update(normalizeAlipayBody(params, { includeSignType: true }), "utf8")
   .sign(privateKey, "base64");
 
 const verifyAlipaySignature = (params: Record<string, string>, publicKey: string) => {
@@ -62,7 +62,7 @@ const verifyAlipaySignature = (params: Record<string, string>, publicKey: string
 
   return crypto
     .createVerify("RSA-SHA256")
-    .update(normalizeAlipayBody(params), "utf8")
+    .update(normalizeAlipayBody(params, { includeSignType: false }), "utf8")
     .verify(publicKey, signature, "base64");
 };
 

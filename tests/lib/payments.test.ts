@@ -16,16 +16,21 @@ let privateKey = "";
 let publicKey = "";
 let userId = "";
 
-const normalizeAlipayBody = (body: Record<string, string>) => Object.keys(body)
-  .filter((key) => key !== "sign" && key !== "sign_type" && body[key] !== undefined && body[key] !== "")
+const normalizeAlipayBody = (body: Record<string, string>, options: Readonly<{ includeSignType: boolean }>) => Object.keys(body)
+  .filter((key) => key !== "sign" && (options.includeSignType || key !== "sign_type") && body[key] !== undefined && body[key] !== "")
   .sort()
   .map((key) => `${key}=${body[key]}`)
   .join("&");
 
-const signAlipayParams = (params: Record<string, string>) => crypto
+const signAlipayParams = (params: Record<string, string>, options = { includeSignType: false }) => crypto
   .createSign("RSA-SHA256")
-  .update(normalizeAlipayBody(params), "utf8")
+  .update(normalizeAlipayBody(params, options), "utf8")
   .sign(privateKey, "base64");
+
+const verifyAlipayParams = (params: Record<string, string>, options = { includeSignType: true }) => crypto
+  .createVerify("RSA-SHA256")
+  .update(normalizeAlipayBody(params, options), "utf8")
+  .verify(publicKey, params.sign, "base64");
 
 const createConfig = (): ServerConfig => ({
   uiMode: "configurable",
@@ -83,6 +88,8 @@ const createWebhookBody = (overrides: Partial<Record<string, string>> = {}) => {
   return new URLSearchParams({ ...params, sign_type: "RSA2", sign: signAlipayParams(params) }).toString();
 };
 
+const parseCheckoutParams = (checkoutUrl: string) => Object.fromEntries(new URL(checkoutUrl).searchParams.entries());
+
 beforeEach(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "gpt-image2-payments-"));
   const keyPair = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -103,6 +110,15 @@ afterEach(() => {
 });
 
 describe("payments", () => {
+  it("signs Alipay checkout URLs with sign_type included", () => {
+    const order = createPaymentOrder({ userId, packId: "starter", config });
+    const params = parseCheckoutParams(order.checkoutUrl);
+
+    expect(params.sign_type).toBe("RSA2");
+    expect(verifyAlipayParams(params)).toBe(true);
+    expect(verifyAlipayParams(params, { includeSignType: false })).toBe(false);
+  });
+
   it("settles valid Alipay webhooks", () => {
     const result = settleAlipayWebhook(createWebhookBody(), config);
 
