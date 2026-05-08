@@ -73,7 +73,7 @@ describe("auth", () => {
 
   it("bootstraps admin and reads session state", async () => {
     const session = await loginWithPassword("admin@example.com", "password123", config);
-    const cookie = createSessionCookie(session.token, session.expiresAt).split(";")[0];
+    const cookie = createSessionCookie(session.token, session.expiresAt, config).split(";")[0];
     const authState = await getAuthState(new Request("http://localhost/api/auth/me", { headers: { cookie } }), config);
 
     expect(authState.authenticated).toBe(true);

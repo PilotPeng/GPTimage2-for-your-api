@@ -130,8 +130,8 @@ export const hashActivationCode = (code: string, config: ServerConfig) => {
   return crypto.createHmac("sha256", config.sessionSecret).update(code.trim().toUpperCase()).digest("hex");
 };
 
-export const createSessionCookie = (token: string, expiresAt: string) => {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+export const createSessionCookie = (token: string, expiresAt: string, config: ServerConfig) => {
+  const secure = config.appBaseUrl.startsWith("https://") ? "; Secure" : "";
   return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${new Date(expiresAt).toUTCString()}${secure}`;
 };
 

@@ -36,7 +36,7 @@ export async function POST(request: Request) {
       sessionExpiresAt: session.expiresAt,
     };
     const response = NextResponse.json(body);
-    response.headers.set("Set-Cookie", createSessionCookie(session.token, session.expiresAt));
+    response.headers.set("Set-Cookie", createSessionCookie(session.token, session.expiresAt, config));
     return response;
   } catch (error) {
     return createErrorResponse(error);
