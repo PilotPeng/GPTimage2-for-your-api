@@ -14,6 +14,8 @@ const LEGACY_ACTIVE_JOB_STORAGE_KEY = "gpt-image2.activeJob";
 const getActiveJobStorageKey = (variant: UiMode) => `${LEGACY_ACTIVE_JOB_STORAGE_KEY}.${variant}`;
 const ACTIVE_JOB_NOT_FOUND_LIMIT = 3;
 const ACTIVE_JOB_SUBMIT_GRACE_MS = 60_000;
+const DEFAULT_IMAGE_JOB_RETRY_MS = 2_000;
+const MIN_IMAGE_JOB_RETRY_MS = 1_000;
 const TRANSIENT_SUBMIT_ERROR_PATTERNS = ["Load failed", "Failed to fetch", "NetworkError"] as const;
 
 const fallbackConfig: PublicConfig = {
@@ -88,6 +90,14 @@ const createHistoryItem = (prompt: string, mode: ImageMode, result: ImageGenerat
 const isRecoverableSubmitError = (error: unknown) => error instanceof Error
   && TRANSIENT_SUBMIT_ERROR_PATTERNS.some((pattern) => error.message.includes(pattern));
 
+const normalizeRetryAfterMs = (retryAfterMs: unknown) => {
+  if (typeof retryAfterMs !== "number" || !Number.isFinite(retryAfterMs)) {
+    return DEFAULT_IMAGE_JOB_RETRY_MS;
+  }
+
+  return Math.max(MIN_IMAGE_JOB_RETRY_MS, retryAfterMs);
+};
+
 type ActiveImageJob = Readonly<{
   jobId: string;
   prompt: string;
@@ -119,7 +129,7 @@ const parseActiveJob = (value: string | null): ActiveImageJob | undefined => {
         prompt: parsed.prompt,
         mode: parsed.mode,
         createdAt: parsed.createdAt,
-        retryAfterMs: typeof parsed.retryAfterMs === "number" ? parsed.retryAfterMs : 2_000,
+        retryAfterMs: normalizeRetryAfterMs(parsed.retryAfterMs),
       };
     }
   } catch {
@@ -152,9 +162,12 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(() => Boolean(initialActiveJob));
   const [countdownSeconds, setCountdownSeconds] = useState(GENERATION_COUNTDOWN_SECONDS);
   const [activeJob, setActiveJob] = useState<ActiveImageJob | undefined>(() => initialActiveJob);
+  const [isPollingEnabled, setIsPollingEnabled] = useState(() => Boolean(initialActiveJob));
   const [jobStatus, setJobStatus] = useState<ImageJobStatus | undefined>(() => initialActiveJob ? "queued" : undefined);
   const activeJobRef = useRef<ActiveImageJob | undefined>(undefined);
   const isCreatingJobRef = useRef(false);
+  const isPollingJobRef = useRef(false);
+  const lastPollStartedAtRef = useRef(0);
   const notFoundCountRef = useRef(0);
 
   useEffect(() => {
@@ -271,16 +284,21 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     }
   };
 
-  const persistActiveJob = useCallback((job: ActiveImageJob) => {
+  const saveActiveJobSnapshot = useCallback((job: ActiveImageJob) => {
     activeJobRef.current = job;
-    setActiveJob(job);
     window.localStorage.setItem(activeJobStorageKey, JSON.stringify(job));
     window.localStorage.removeItem(LEGACY_ACTIVE_JOB_STORAGE_KEY);
   }, [activeJobStorageKey]);
 
+  const persistActiveJob = useCallback((job: ActiveImageJob) => {
+    saveActiveJobSnapshot(job);
+    setActiveJob(job);
+  }, [saveActiveJobSnapshot]);
+
   const clearActiveJob = useCallback(() => {
     activeJobRef.current = undefined;
     setActiveJob(undefined);
+    setIsPollingEnabled(false);
     setJobStatus(undefined);
     window.localStorage.removeItem(activeJobStorageKey);
     window.localStorage.removeItem(LEGACY_ACTIVE_JOB_STORAGE_KEY);
@@ -334,8 +352,8 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         return;
       }
 
-      const nextJob = { ...job, retryAfterMs: response.retryAfterMs };
-      persistActiveJob(nextJob);
+      const nextJob = { ...job, retryAfterMs: normalizeRetryAfterMs(response.retryAfterMs) };
+      saveActiveJobSnapshot(nextJob);
     } catch (pollError) {
       notFoundCountRef.current += 1;
 
@@ -347,10 +365,29 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         setIsSubmitting(false);
       }
     }
-  }, [clearActiveJob, completeImageJob, persistActiveJob, refreshAccount]);
+  }, [clearActiveJob, completeImageJob, refreshAccount, saveActiveJobSnapshot]);
+
+  const runPollImageJob = useCallback(async (job: ActiveImageJob, options: Readonly<{ force?: boolean }> = {}) => {
+    if (isPollingJobRef.current || isCreatingJobRef.current) {
+      return;
+    }
+
+    if (!options.force && Date.now() - lastPollStartedAtRef.current < job.retryAfterMs) {
+      return;
+    }
+
+    isPollingJobRef.current = true;
+    lastPollStartedAtRef.current = Date.now();
+
+    try {
+      await pollImageJob(job);
+    } finally {
+      isPollingJobRef.current = false;
+    }
+  }, [pollImageJob]);
 
   useEffect(() => {
-    if (!activeJob || !isSubmitting) {
+    if (!activeJob || !isSubmitting || !isPollingEnabled) {
       return;
     }
 
@@ -363,7 +400,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
           return;
         }
 
-        await pollImageJob(activeJobRef.current);
+        await runPollImageJob(activeJobRef.current);
 
         if (!isCancelled && activeJobRef.current) {
           void schedulePoll(activeJobRef.current.retryAfterMs);
@@ -380,12 +417,12 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [activeJob, isSubmitting, pollImageJob]);
+  }, [activeJob, isPollingEnabled, isSubmitting, runPollImageJob]);
 
   useEffect(() => {
     const pollCurrentJob = () => {
-      if (activeJobRef.current && !isCreatingJobRef.current) {
-        void pollImageJob(activeJobRef.current);
+      if (activeJobRef.current && isSubmitting && isPollingEnabled) {
+        void runPollImageJob(activeJobRef.current);
       }
     };
 
@@ -396,7 +433,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
       window.removeEventListener("focus", pollCurrentJob);
       document.removeEventListener("visibilitychange", pollCurrentJob);
     };
-  }, [pollImageJob]);
+  }, [isPollingEnabled, isSubmitting, runPollImageJob]);
 
   const validateClientInput = () => {
     if (isConfigurable && !apiBaseUrl.trim()) {
@@ -496,7 +533,7 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
       prompt: prompt.trim(),
       mode,
       createdAt: new Date().toISOString(),
-      retryAfterMs: 2_000,
+      retryAfterMs: DEFAULT_IMAGE_JOB_RETRY_MS,
     };
 
     setCountdownSeconds(GENERATION_COUNTDOWN_SECONDS);
@@ -506,30 +543,37 @@ export function PromptForm({ variant = "configurable" }: PromptFormProps) {
     setConnectivityMessage("");
     setResult(undefined);
     isCreatingJobRef.current = true;
-    persistActiveJob(job);
+    saveActiveJobSnapshot(job);
 
     try {
       const createdJob = await createImageJob(createClientImageRequest(), job.jobId);
-      const nextJob = { ...job, retryAfterMs: createdJob.retryAfterMs };
+      const nextJob = { ...job, retryAfterMs: normalizeRetryAfterMs(createdJob.retryAfterMs) };
       setJobStatus(createdJob.status);
+      isCreatingJobRef.current = false;
+      setIsPollingEnabled(true);
       persistActiveJob(nextJob);
       void refreshAccount();
-      isCreatingJobRef.current = false;
-      await pollImageJob(nextJob);
     } catch (submitError) {
       isCreatingJobRef.current = false;
 
       if (isRecoverableSubmitError(submitError)) {
-        await pollImageJob(job);
+        await runPollImageJob(job, { force: true });
 
-        if (activeJobRef.current?.jobId !== job.jobId) {
+        const recoveredJob = activeJobRef.current;
+
+        if (!recoveredJob || recoveredJob.jobId !== job.jobId) {
           return;
         }
-      } else {
-        clearActiveJob();
-        setIsSubmitting(false);
+
+        setError("");
+        setIsPollingEnabled(true);
+        persistActiveJob(recoveredJob);
+        void refreshAccount();
+        return;
       }
 
+      clearActiveJob();
+      setIsSubmitting(false);
       void refreshAccount();
       setError(submitError instanceof Error ? submitError.message : "生成任务提交失败，请稍后重试。");
     }

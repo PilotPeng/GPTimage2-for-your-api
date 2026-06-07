@@ -319,6 +319,39 @@ describe("PromptForm", () => {
     resolveJob(new Response(JSON.stringify({ jobId: "job-1", status: "queued", statusUrl: "api/images/jobs/job-1", retryAfterMs: 1 }), { status: 202 }));
   });
 
+  it("waits for retryAfterMs before polling queued jobs again", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(publicConfig), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jobId: "job-1", status: "queued", statusUrl: "api/images/jobs/job-1", retryAfterMs: 60_000 }), { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          jobId: "job-1",
+          status: "queued",
+          createdAt: "2026-04-27T08:00:00.000Z",
+          updatedAt: "2026-04-27T08:00:01.000Z",
+          retryAfterMs: 60_000,
+        }), { status: 200 }),
+      );
+
+    render(<PromptForm />);
+
+    await waitFor(() => expect(screen.getByLabelText("API 基础地址")).toHaveValue(publicConfig.defaultApiBaseUrl));
+    await user.type(screen.getByLabelText("创作描述"), "polling prompt");
+    await user.click(screen.getByRole("button", { name: "开始生成" }));
+    const getStatusCalls = () => fetchMock.mock.calls.filter(([url]) => typeof url === "string" && url.startsWith("/api/images/jobs/"));
+    await waitFor(() => expect(getStatusCalls()).toHaveLength(1));
+
+    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("focus"));
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+    expect(getStatusCalls()).toHaveLength(1);
+  });
+
   it("resets submit state after non-recoverable create failures", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     fetchMock
