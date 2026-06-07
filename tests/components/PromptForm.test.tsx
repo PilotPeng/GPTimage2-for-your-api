@@ -69,7 +69,7 @@ describe("PromptForm", () => {
           createdAt: "2026-04-27T08:00:00.000Z",
           updatedAt: "2026-04-27T08:00:01.000Z",
           retryAfterMs: 1,
-          result: { images: [{ url: "https://cdn.example.com/result.png" }] },
+          result: { images: [{ url: "https://cdn.example.com/result.png", b64: "ZmFrZQ==", mimeType: "image/png" }] },
         }), { status: 200 }),
       );
 
@@ -80,11 +80,11 @@ describe("PromptForm", () => {
     await userEvent.type(screen.getByLabelText("创作描述"), "a tiny robot");
     await userEvent.click(screen.getByRole("button", { name: "开始生成" }));
 
-    expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "https://cdn.example.com/result.png");
+    expect(await screen.findByAltText("生成图片 1")).toHaveAttribute("src", "data:image/png;base64,ZmFrZQ==");
     expect(screen.getByText("a tiny robot", { selector: "strong" })).toBeInTheDocument();
     expect(saveGenerationHistoryItemMock).toHaveBeenCalledWith(expect.objectContaining({
       prompt: "a tiny robot",
-      result: { images: [{ url: "https://cdn.example.com/result.png" }] },
+      result: { images: [{ url: "https://cdn.example.com/result.png", b64: "ZmFrZQ==", mimeType: "image/png" }] },
     }));
     expect(window.localStorage.getItem("gpt-image2.history")).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/images")).toBe(true);

@@ -14,13 +14,13 @@ const modeLabels = {
 } as const;
 
 const getImageSource = (image: ImageGenerationResponse["images"][number]) => {
-  if (image.url) {
-    return image.url;
-  }
-
   if (image.b64) {
     const mimeType = image.mimeType ?? "image/png";
     return image.b64.startsWith("data:") ? image.b64 : `data:${mimeType};base64,${image.b64}`;
+  }
+
+  if (image.url) {
+    return image.url;
   }
 
   return undefined;
